@@ -9,7 +9,7 @@
   ===== GITHUB SYNC – ĐỒNG BỘ MỖI KHI CÓ THAY ĐỔI (localStorage) =====
   Dán NGUYÊN khối này 1 lần vào file HTML của app: tốt nhất đặt trong <head>.
   Thiết lập 1 lần trên mỗi máy. Sau đó, mỗi lần bạn thao tác làm dữ liệu thay đổi là app tự đồng bộ, không hỏi gì.
-  Mở app là đồng bộ NGAY (kéo dữ liệu mới từ máy khác + đẩy thay đổi chưa lưu), sau đó mỗi thao tác thay đổi tiếp tục tự đồng bộ.
+  Khi dữ liệu đổi, chờ đủ 30 giây không có thay đổi mới rồi mới đồng bộ. Tạm hoãn đồng bộ khi ứng dụng đang đăng bài.
   Thiết lập nhanh máy mới: mở link app kèm  #ghs=TOKEN&owner=TENBAN&repo=app-data  (chỉ cần 1 lần, script tự xóa phần # khỏi thanh địa chỉ).
 -->
 <script>
@@ -62,9 +62,64 @@
         } catch (e) { /* bỏ qua */ }
     })();
 
-    let syncing = false, again = false, muted = false, changeSeq = 0, lastCheckAt = 0, lastSig = '';
+    let syncing = false, muted = false, changeSeq = 0, lastCheckAt = 0, lastSig = '';
     let pushTimer = null, retryTimer = null, watchTimer = null;
+    let activePostRequests = 0, autoSyncPending = false;
     let cur = { state: 'off', msg: '' }, ui = null;
+
+    // Hoãn đồng bộ khi app đang gửi yêu cầu ghi (đăng bài/lưu nội dung) hoặc báo trạng thái bận.
+    function isGithubRequest(url) {
+        try { return new URL(String(url || ''), location.href).hostname === 'api.github.com'; }
+        catch (e) { return false; }
+    }
+    function isWriteRequest(method, url) {
+        return /^(POST|PUT|PATCH|DELETE)$/i.test(String(method || 'GET')) && !isGithubRequest(url);
+    }
+    function beginPostRequest() { activePostRequests++; }
+    function endPostRequest() {
+        activePostRequests = Math.max(0, activePostRequests - 1);
+        if (!activePostRequests && autoSyncPending) scheduleAutoSync();
+    }
+    function isPosting() {
+        if (activePostRequests > 0) return true;
+        try {
+            if (document.querySelector('[aria-busy="true"],[data-posting="true"],[data-publishing="true"]')) return true;
+            return /(?:đang đăng(?: bài)?|đang tải lên|đang xuất bản|đang gửi|\b(?:posting|publishing|uploading)\s*(?:\.\.\.|…|\d{1,3}%))/i.test((document.body && document.body.innerText) || '');
+        } catch (e) { return false; }
+    }
+    try {
+        if (typeof window.fetch === 'function') {
+            const nativeFetch = window.fetch;
+            window.fetch = function (input, init) {
+                const method = (init && init.method) || (input && input.method) || 'GET';
+                const url = (typeof input === 'string') ? input : (input && input.url) || '';
+                const tracked = isWriteRequest(method, url);
+                if (tracked) beginPostRequest();
+                let result;
+                try { result = nativeFetch.apply(this, arguments); }
+                catch (e) { if (tracked) endPostRequest(); throw e; }
+                return tracked ? Promise.resolve(result).finally(endPostRequest) : result;
+            };
+        }
+        if (window.XMLHttpRequest) {
+            const xp = XMLHttpRequest.prototype, nativeOpen = xp.open, nativeSend = xp.send;
+            xp.open = function (method, url) {
+                this.__ghsMethod = method;
+                this.__ghsUrl = url;
+                return nativeOpen.apply(this, arguments);
+            };
+            xp.send = function () {
+                const tracked = isWriteRequest(this.__ghsMethod, this.__ghsUrl);
+                if (!tracked) return nativeSend.apply(this, arguments);
+                beginPostRequest();
+                let ended = false;
+                const finish = () => { if (!ended) { ended = true; endPostRequest(); } };
+                this.addEventListener('loadend', finish, { once: true });
+                try { return nativeSend.apply(this, arguments); }
+                catch (e) { finish(); throw e; }
+            };
+        }
+    } catch (e) { /* nếu không thể theo dõi request thì vẫn dùng các dấu hiệu bận trong giao diện */ }
 
     // ---------- Nhường luồng chính cho app (tránh giật/khựng) ----------
     const yieldMain = () => new Promise(r => {
@@ -242,9 +297,11 @@
 
     // Một vòng đồng bộ 2 chiều. Trả về { reload } nếu dữ liệu máy này vừa được cập nhật từ GitHub.
     async function syncOnce(attempt) {
+        if (isPosting()) return { reload: false, deferred: true };
         const seq0 = changeSeq;
         const quick = !meta.dirty && attempt === 0 && !!meta.base;          // không có gì chờ lưu: chỉ kiểm tra nhẹ
         const head = await remoteHead(quick);
+        if (isPosting()) return { reload: false, deferred: true };
         if (head.unchanged && !meta.dirty) { lastCheckAt = Date.now(); return { reload: false }; }   // GitHub không có gì mới
 
         await yieldMain();
@@ -260,7 +317,9 @@
             new Set(Object.keys(nb).concat(Object.keys(meta.base))).forEach(k => { if ((nb[k] || '∅') !== (meta.base[k] || '∅')) diff = true; });
             m = { out: localData, changedLocal: false, needPush: diff };
         } else {
+            if (isPosting()) return { reload: false, deferred: true };
             const doc = head.sha ? await fetchDoc() : null;
+            if (isPosting()) return { reload: false, deferred: true };
             const remAll = (doc && doc.data) || {};
             const remData = {};
             Object.keys(remAll).forEach(k => {
@@ -271,11 +330,13 @@
             m = await mergeData(localData, remData, meta.base, (doc && Number(doc.updatedAt)) || 0, meta.localChangedAt || 0);
         }
 
+        if (isPosting()) return { reload: false, deferred: true };
         let reload = false;
         if (m.changedLocal) { backupLocal(localData); setLocal(m.out); reload = true; }
 
         let newSha = head.sha;
         if (m.needPush) {
+            if (isPosting()) return { reload: false, deferred: true };
             await yieldMain();
             const text = JSON.stringify({ app: 'github-sync', updatedAt: Date.now(), origin: location.origin, data: Object.assign({}, extra, m.out) });
             const body = { message: 'sync ' + new Date().toISOString(), content: await toB64(text), branch: cfg.branch };
@@ -293,40 +354,80 @@
         if (!nb || m.changedLocal) nb = await hashMap(m.out);
         meta.sha = newSha; meta.base = nb;
         if (JSON.stringify(extra).length < 200000) meta.extra = extra; else delete meta.extra;
-        meta.dirty = (changeSeq !== seq0);                                // có thay đổi mới trong lúc đồng bộ -> chạy thêm vòng nữa
+        meta.dirty = (changeSeq !== seq0);                                // thay đổi trong lúc đồng bộ sẽ giữ lịch chờ 30 giây
         saveMeta();
         lastSig = m.changedLocal ? sig() : sig0;
         lastCheckAt = Date.now();
-        if (meta.dirty) again = true;
         return { reload: reload };
     }
 
-    async function runSync() {
+    async function runSync(force) {
         if (!configured()) return { reload: false };
-        if (syncing) { again = true; return { reload: false }; }
-        syncing = true; clearTimeout(retryTimer); setStatus('sync');
-        const res = { reload: false };
+        if (isPosting()) {
+            autoSyncPending = true;
+            setStatus('dirty', 'Đang đăng bài hoặc tải nội dung lên; sẽ đồng bộ sau khi hoàn tất và đủ 30 giây yên lặng.');
+            scheduleAutoSync();
+            return { reload: false, deferred: true };
+        }
+        const quietMs = Math.max(0, Number(PRESET.delayMs) || 0);
+        if (force !== true && meta.dirty && Date.now() - (Number(meta.localChangedAt) || 0) < quietMs) {
+            autoSync();
+            return { reload: false, deferred: true };
+        }
+        if (syncing) { autoSync(); return { reload: false, deferred: true }; }
+        syncing = true; clearTimeout(pushTimer); autoSyncPending = false; clearTimeout(retryTimer); setStatus('sync');
+        const res = { reload: false, deferred: false };
         try {
-            let loops = 0;
-            do { again = false; const r = await syncOnce(0); if (r.reload) res.reload = true; } while (again && ++loops < 5);
-            setStatus('ok', 'Đã đồng bộ lúc ' + new Date().toLocaleTimeString());
+            const r = await syncOnce(0);
+            if (r.reload) res.reload = true;
+            if (r.deferred) {
+                res.deferred = true;
+                autoSyncPending = true;
+                setStatus('dirty', 'Đang đăng bài hoặc tải nội dung lên; sẽ đồng bộ sau khi hoàn tất và đủ 30 giây yên lặng.');
+                scheduleAutoSync();
+            } else if (meta.dirty) {
+                setStatus('dirty', 'Có thay đổi mới; chờ 30 giây yên lặng rồi sẽ đồng bộ.');
+                scheduleAutoSync();
+            } else {
+                setStatus('ok', 'Đã đồng bộ lúc ' + new Date().toLocaleTimeString());
+            }
         } catch (e) {
             setStatus('err', 'Lỗi: ' + e.message);
             if (!e.status || e.status >= 500) retryTimer = setTimeout(autoSync, 30000);   // lỗi mạng: tự thử lại
         } finally { syncing = false; }
         return res;
     }
-    function autoSync() { runSync().then(r => { if (r.reload) reloadOnce(); }); }
+    function performAutoSync() { runSync(false).then(r => { if (r.reload) reloadOnce(); }); }
+    function performSync() { runSync(true).then(r => { if (r.reload) reloadOnce(); }); }
 
-    // Gọi ngay khi app ghi/xóa dữ liệu. Chờ yên delayMs rồi đồng bộ (vào lúc trình duyệt rảnh, nên không giật khi đang dùng app).
+    function scheduleAutoSync() {
+        if (!configured()) return;
+        autoSyncPending = true;
+        clearTimeout(pushTimer);
+        const quietMs = Math.max(0, Number(PRESET.delayMs) || 0);
+        const elapsed = meta.dirty ? Math.max(0, Date.now() - (Number(meta.localChangedAt) || Date.now())) : quietMs;
+        const wait = meta.dirty ? Math.max(0, quietMs - elapsed) : quietMs;
+        pushTimer = setTimeout(() => {
+            if (!autoSyncPending || !configured()) return;
+            if (isPosting()) { pushTimer = setTimeout(scheduleAutoSync, 1000); return; }
+            if (meta.dirty && Date.now() - (Number(meta.localChangedAt) || 0) < quietMs) {
+                scheduleAutoSync(); return;
+            }
+            autoSyncPending = false;
+            whenIdle(performAutoSync, 1500);
+        }, wait);
+    }
+    function autoSync() { scheduleAutoSync(); }
+
+    // Mỗi thay đổi khởi động lại bộ đếm 30 giây; chỉ đồng bộ sau 30 giây yên lặng và khi app không đăng bài.
     function noteChange() {
         if (!configured()) return;
         changeSeq++;
-        const was = meta.dirty;
-        meta.dirty = true; meta.localChangedAt = Date.now();
-        if (!was) saveMeta();
-        clearTimeout(pushTimer);
-        pushTimer = setTimeout(() => { saveMeta(); whenIdle(autoSync, 1500); }, PRESET.delayMs >= 0 ? PRESET.delayMs : 1000);
+        meta.dirty = true;
+        meta.localChangedAt = Date.now();
+        saveMeta();
+        lastSig = sig();
+        autoSync();
         if (!syncing && cur.state !== 'dirty') setStatus('dirty');
     }
 
@@ -370,9 +471,8 @@
 
     document.addEventListener('visibilitychange', () => {
         if (!configured()) return;
-        if (document.visibilityState === 'hidden') {                      // rời tab/đóng app: lưu ngay
+        if (document.visibilityState === 'hidden') {                      // rời tab/đóng app: lưu trạng thái, đồng bộ sau khoảng yên lặng
             const s = sig(); if (s !== lastSig) { lastSig = s; noteChange(); }
-            clearTimeout(pushTimer);
             if (meta.dirty) { saveMeta(); autoSync(); }
             return;
         }
@@ -437,7 +537,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
     <button class="b d" id="off" type="button">Ngắt kết nối máy này</button>
   </div>
   <pre class="keys" id="keys" style="display:none"></pre>
-  <p class="note">Sau khi kết nối, app tự đồng bộ mỗi khi bạn thao tác làm dữ liệu thay đổi, không hỏi gì thêm. Mở app (hoặc quay lại tab) là đồng bộ ngay để lấy dữ liệu mới từ máy khác, sau đó mỗi thay đổi tiếp tục được tự đồng bộ. Nếu 2 máy cùng sửa 1 mục, bản sửa sau cùng thắng; trước khi bị thay thế, dữ liệu máy này được sao lưu 1 bản (nút "Khôi phục"), còn trên GitHub có lịch sử commit. Chỉ đồng bộ localStorage; file lớn trong IndexedDB không đồng bộ. Dữ liệu (kể cả mật khẩu/token nếu app có lưu) nằm trong repo nên hãy dùng repo private. Nhiều app cùng địa chỉ github.io dùng chung localStorage: dùng ô "Chỉ đồng bộ" để giới hạn đúng key của app này.</p>
+  <p class="note">Sau khi kết nối, khi dữ liệu thay đổi app chờ 30 giây không có thay đổi mới rồi mới đồng bộ. App hoãn đồng bộ trong lúc đang đăng bài hoặc tải nội dung lên. Mở app (hoặc quay lại tab) có thể kiểm tra dữ liệu mới từ máy khác. Nếu 2 máy cùng sửa 1 mục, bản sửa sau cùng thắng; trước khi bị thay thế, dữ liệu máy này được sao lưu 1 bản (nút "Khôi phục"), còn trên GitHub có lịch sử commit. Chỉ đồng bộ localStorage; file lớn trong IndexedDB không đồng bộ. Dữ liệu (kể cả mật khẩu/token nếu app có lưu) nằm trong repo nên hãy dùng repo private. Nhiều app cùng địa chỉ github.io dùng chung localStorage: dùng ô "Chỉ đồng bộ" để giới hạn đúng key của app này.</p>
 </div></div>`;
         (document.body || document.documentElement).appendChild(host);
         const $ = id => root.getElementById(id);
@@ -476,12 +576,12 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 meta = { sha: null, letag: null, base: null, dirty: false, localChangedAt: 0 }; saveMeta();
             }
             cfg = next; pats = compile(cfg); saveCfg();
-            const res = await runSync();
+            const res = await runSync(true);
             if (cur.state === 'err') return;
             startWatching(); close();
             if (res.reload) reloadOnce();
         };
-        $('syncnow').onclick = () => { if (!configured()) { setStatus('err', 'Chưa kết nối GitHub.'); return; } autoSync(); };
+        $('syncnow').onclick = () => { if (!configured()) { setStatus('err', 'Chưa kết nối GitHub.'); return; } performSync(); };
         $('pull').onclick = async () => {
             if (!configured()) { setStatus('err', 'Chưa kết nối GitHub.'); return; }
             if (!confirm('Ghi đè TOÀN BỘ dữ liệu máy này bằng dữ liệu trên GitHub?')) return;
@@ -504,7 +604,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             if (!confirm('Khôi phục dữ liệu máy này về bản sao lưu lúc ' + new Date(b.at).toLocaleString() + ' và đẩy lên GitHub?')) return;
             setLocal(b.data);
             changeSeq++; meta.dirty = true; meta.localChangedAt = Date.now(); saveMeta();
-            await runSync();
+            await runSync(true);
             if (cur.state !== 'err') reloadOnce();
         };
         $('off').onclick = () => {
@@ -521,10 +621,17 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
     // ---------- Khởi động ----------
     function boot() {
         if (!configured()) return;
-        // Chỉ đồng bộ ngay khi mở app nếu: (1) có thay đổi chưa kịp lưu từ lần trước, (2) máy chưa từng đồng bộ, hoặc (3) bạn bật pullOnOpen.
+        const quietMs = Math.max(0, Number(PRESET.delayMs) || 0);
+        if (meta.dirty && Date.now() - (Number(meta.localChangedAt) || 0) < quietMs) {
+            setStatus('dirty', 'Có thay đổi gần đây; chờ đủ 30 giây yên lặng rồi sẽ đồng bộ.');
+            autoSync();
+            startWatching();
+            return;
+        }
+        // Có thể kiểm tra dữ liệu mới khi mở app; các thay đổi chưa yên lặng đủ 30 giây sẽ được hoãn.
         const needNow = PRESET.pullOnOpen || meta.dirty || !meta.base;
         if (!needNow) {
-            setStatus('ok', 'Tự đồng bộ mỗi khi có thay đổi. Bấm "Đồng bộ ngay" để kéo dữ liệu mới từ máy khác.');
+            setStatus('ok', 'Tự đồng bộ sau 30 giây yên lặng. Bấm "Đồng bộ ngay" để kéo dữ liệu mới từ máy khác.');
             startWatching();
             return;
         }
@@ -538,7 +645,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             startWatching();
         })();
     }
-    if (PRESET.pullOnOpen) boot();                            // đồng bộ NGAY khi mở app, không chờ trình duyệt rảnh
+    if (PRESET.pullOnOpen) boot();                            // kiểm tra khi mở app, có thay đổi gần đây thì chờ đủ 30 giây
     else if (document.readyState === 'complete') whenIdle(boot, 3000);
     else window.addEventListener('load', () => whenIdle(boot, 3000));
 })();
