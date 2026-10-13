@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Fanpage Control Center · V14.5 Pro Smart Disk Auto-Match & Matrix Publisher</title>
     <!-- Tailwind CSS CDN -->
-    <!--
+<!--
   ===== GITHUB SYNC – ĐỒNG BỘ MỖI KHI CÓ THAY ĐỔI (localStorage) =====
   Dán NGUYÊN khối này 1 lần vào file HTML của app: tốt nhất đặt trong <head>.
   Thiết lập 1 lần trên mỗi máy. Sau đó, mỗi lần bạn thao tác làm dữ liệu thay đổi là app tự đồng bộ, không hỏi gì.
@@ -26,7 +26,7 @@
     const PRESET = {
         owner: '', repo: '', branch: 'main',
         path: '',          // trống = tự đặt theo địa chỉ trang
-        delayMs: 1000,     // sau thao tác thay đổi cuối cùng, chờ bấy nhiêu ms rồi đồng bộ (gộp các thao tác liên tiếp thành 1 lần)
+        delayMs: 30000,    // chờ 30 giây kể từ thao tác thay đổi cuối cùng rồi mới đồng bộ
         pullOnOpen: true,  // true  = mở app/quay lại tab là đồng bộ ngay (mặc định), rồi tiếp tục đồng bộ mỗi khi có thay đổi
                            // false = chỉ đồng bộ khi có thay đổi (mở app không gọi GitHub)
         waitMs: 0          // chỉ dùng khi pullOnOpen = true: 0 = app mở ngay; 500-800 = chờ dữ liệu mới trước khi hiện trang
