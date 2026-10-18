@@ -203,6 +203,59 @@
         try { return JSON.parse(text); } catch (e) { throw new Error('File dữ liệu trên GitHub không đúng định dạng JSON'); }
     }
 
+    // ---------- Kho media dùng chung cho file tải lên từ máy tính ----------
+    const MEDIA_ROOT = 'fcc-media/page-control/';
+    const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+    const mediaApiUrl = path => repoUrl() + '/contents/' + enc(path);
+    function isSafeMediaPath(path) {
+        if (typeof path !== 'string' || !path.startsWith(MEDIA_ROOT)) return false;
+        return path.split('/').every(part => part && part !== '.' && part !== '..');
+    }
+    async function blobToB64(blob) {
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(binary);
+    }
+    async function uploadMedia(file, id) {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync trước khi lưu file để dùng trên máy khác.');
+        if (!file || typeof file.size !== 'number') throw new Error('File tải lên không hợp lệ.');
+        if (file.size > MEDIA_MAX_BYTES) throw new Error('File vượt quá 50 MiB. Hãy dùng file nhỏ hơn hoặc lưu media ở dịch vụ lưu trữ riêng.');
+
+        const safeId = String(id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const safeName = String(file.name || 'media').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-100) || 'media';
+        if (!safeId) throw new Error('Không tạo được mã file để lưu lên GitHub.');
+        const path = MEDIA_ROOT + safeId + '-' + safeName;
+        const url = mediaApiUrl(path);
+        const body = {
+            message: 'store uploaded media ' + safeId,
+            content: await blobToB64(file),
+            branch: cfg.branch
+        };
+        const r = await fetch(url, { method: 'PUT', headers: hdr({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+        if (r.status === 409 || r.status === 422) {
+            // Một lần thử trước có thể đã ghi file nhưng mất phản hồi mạng.
+            const existing = await fetch(url + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr(), cache: 'no-store' });
+            if (existing.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+        }
+        if (!r.ok) throw mkErr(r.status);
+        return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+    }
+    async function downloadMedia(path) {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để tải media từ kho dùng chung.');
+        if (!isSafeMediaPath(path)) throw new Error('Đường dẫn media trên GitHub không hợp lệ.');
+        const r = await fetch(mediaApiUrl(path) + '?ref=' + encodeURIComponent(cfg.branch), {
+            headers: hdr({ Accept: 'application/vnd.github.raw+json' }), cache: 'no-store'
+        });
+        if (r.status === 404) throw new Error('Không tìm thấy file media trên GitHub. Hãy kiểm tra kết nối hoặc đồng bộ lại Kho.');
+        if (!r.ok) throw mkErr(r.status);
+        return r.blob();
+    }
+    window.__GHS_MEDIA__ = Object.freeze({ isConfigured: configured, upload: uploadMedia, download: downloadMedia, maxBytes: MEDIA_MAX_BYTES });
+
     // Gộp dữ liệu 3 bên (máy này / GitHub / lần đồng bộ trước). Mỗi key xử lý riêng, không cần hỏi:
     //  - chỉ 1 bên đổi  -> lấy bên đổi
     //  - cả 2 bên cùng đổi 1 key -> bên mới hơn thắng
@@ -437,7 +490,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
     <button class="b d" id="off" type="button">Ngắt kết nối máy này</button>
   </div>
   <pre class="keys" id="keys" style="display:none"></pre>
-  <p class="note">Sau khi kết nối, app tự đồng bộ mỗi khi bạn thao tác làm dữ liệu thay đổi, không hỏi gì thêm. Mở app (hoặc quay lại tab) là đồng bộ ngay để lấy dữ liệu mới từ máy khác, sau đó mỗi thay đổi tiếp tục được tự đồng bộ. Nếu 2 máy cùng sửa 1 mục, bản sửa sau cùng thắng; trước khi bị thay thế, dữ liệu máy này được sao lưu 1 bản (nút "Khôi phục"), còn trên GitHub có lịch sử commit. Chỉ đồng bộ localStorage; file lớn trong IndexedDB không đồng bộ. Dữ liệu (kể cả mật khẩu/token nếu app có lưu) nằm trong repo nên hãy dùng repo private. Nhiều app cùng địa chỉ github.io dùng chung localStorage: dùng ô "Chỉ đồng bộ" để giới hạn đúng key của app này.</p>
+  <p class="note">Sau khi kết nối, app tự đồng bộ dữ liệu Kho mỗi khi bạn thao tác và khi mở app. File tải lên từ máy được lưu riêng trong thư mục fcc-media/page-control của repo, còn nội dung bài và thông tin file được đồng bộ qua localStorage. Nếu giới hạn key đồng bộ, hãy gồm fb_post_library_v12. Dùng repo private và cùng cấu hình GitHub Sync trên mọi máy. File tối đa 50 MiB; tệp lớn hơn nên dùng dịch vụ lưu trữ media riêng. GitHub lưu lịch sử các phiên bản file trong repo.</p>
 </div></div>`;
         (document.body || document.documentElement).appendChild(host);
         const $ = id => root.getElementById(id);
@@ -723,7 +776,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                                 <h3 class="text-base md:text-lg font-bold text-white">Import Kho Bài Viết PHOTO & VIDEO Từ Ổ Đĩa Máy Tính Qua Excel</h3>
                                 <span class="bg-cyan-500/20 text-cyan-300 text-[10px] font-mono px-2.5 py-0.5 rounded-full border border-cyan-500/30 font-bold">V14.5 Smart Fuzzy Auto-Match Engine</span>
                             </div>
-                            <p class="text-xs text-slate-400 mt-0.5">Tự động nhận diện đường dẫn đầy đủ, gọt bỏ ký tự thừa, tìm kiếm tương đồng (Fuzzy Matching) và xử lý triệt để trạng thái Chưa tìm thấy file!</p>
+                            <p class="text-xs text-slate-400 mt-0.5">Tự động nhận diện file, ghép với bài viết; media tải lên sẽ được lưu vào repo GitHub private để dùng trên máy khác.</p>
                         </div>
                     </div>
                     <button onclick="closeLocalExcelImportModal()" class="text-slate-400 hover:text-white p-2 text-xl"><i class="fa-solid fa-xmark"></i></button>
@@ -2328,7 +2381,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         </button>
                     </div>
                     <div id="lib-media-file-status" class="text-[11px] text-slate-400">Chưa chọn tệp đính kèm.</div>
-                    <p class="text-[10px] text-slate-500">Ảnh/video được lưu trong kho của trình duyệt trên thiết bị này; không cần link.</p>
+                    <p class="text-[10px] text-slate-500">Ảnh/video được lưu trong IndexedDB trên máy này và repo GitHub private để máy khác tải về. Kết nối GitHub Sync trước khi lưu; giới hạn 50 MiB mỗi file.</p>
                 </div>
                 <div class="flex items-center gap-2 pt-1">
                     <input type="checkbox" id="lib-tag-followers" class="accent-teal-500 w-4 h-4 rounded" checked>
@@ -2336,7 +2389,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 </div>
                 <div class="flex gap-2.5 pt-2">
                     <button onclick="closeAddLibraryPostModal()" class="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl transition">Hủy</button>
-                    <button onclick="saveLibraryPost()" class="w-1/2 bg-teal-600 hover:bg-teal-500 text-white font-semibold py-2.5 rounded-xl transition shadow-lg shadow-teal-950/40">Lưu Vào Kho</button>
+                    <button id="btn-save-library-post" onclick="saveLibraryPost()" class="w-1/2 bg-teal-600 hover:bg-teal-500 text-white font-semibold py-2.5 rounded-xl transition shadow-lg shadow-teal-950/40">Lưu Vào Kho</button>
                 </div>
             </div>
         </div>
@@ -2523,7 +2576,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     const store = tx.objectStore(IDB_STORE);
                     const record = {
                         id: id,
-                        fileName: fileName || fileOrBlob.name,
+                        fileName: fileName || fileOrBlob.name || 'media_upload',
                         type: fileOrBlob.type,
                         size: fileOrBlob.size,
                         blob: fileOrBlob,
@@ -2539,18 +2592,35 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             }
         }
 
-        async function getMediaBlobFromIDB(id) {
+        async function getMediaBlobFromIDB(id, remoteMediaPath = '', fileName = '', mimeType = '') {
+            let localBlob = null;
+            if (id) {
+                try {
+                    const db = await openLocalMediaDB();
+                    localBlob = await new Promise((resolve, reject) => {
+                        const tx = db.transaction(IDB_STORE, 'readonly');
+                        const store = tx.objectStore(IDB_STORE);
+                        const req = store.get(id);
+                        req.onsuccess = () => resolve(req.result ? req.result.blob : null);
+                        req.onerror = () => reject(req.error);
+                    });
+                } catch(e) {
+                    console.error('IDB get error:', e);
+                }
+            }
+            if (localBlob) return localBlob;
+
+            const mediaSync = window.__GHS_MEDIA__;
+            if (!remoteMediaPath || !mediaSync || !mediaSync.isConfigured()) return null;
             try {
-                const db = await openLocalMediaDB();
-                return new Promise((resolve, reject) => {
-                    const tx = db.transaction(IDB_STORE, 'readonly');
-                    const store = tx.objectStore(IDB_STORE);
-                    const req = store.get(id);
-                    req.onsuccess = () => resolve(req.result ? req.result.blob : null);
-                    req.onerror = () => reject(req.error);
-                });
+                const downloadedBlob = await mediaSync.download(remoteMediaPath);
+                const remoteBlob = mimeType && downloadedBlob.type !== mimeType
+                    ? new Blob([downloadedBlob], { type: mimeType })
+                    : downloadedBlob;
+                if (id) await saveMediaBlobToIDB(id, remoteBlob, fileName || 'media_upload');
+                return remoteBlob;
             } catch(e) {
-                console.error('IDB get error:', e);
+                console.error('GitHub media download error:', e);
                 return null;
             }
         }
@@ -3816,12 +3886,21 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 return;
             }
 
+            const hasLocalMediaToUpload = stagedMatchedLibraryPosts.some(item => !!item.matchedFile);
+            const mediaSync = window.__GHS_MEDIA__;
+            if (hasLocalMediaToUpload && (!mediaSync || !mediaSync.isConfigured())) {
+                showToast('Hãy kết nối GitHub Sync bằng nút ☁ trước khi nạp file từ máy, để các máy khác tải được media.', 'error');
+                return;
+            }
+
             btnConfirm.disabled = true;
-            btnConfirm.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang nạp & lưu trữ dữ liệu vào IndexedDB...';
+            btnConfirm.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài và tải media lên GitHub...';
 
             let countAdded = 0;
             let countSkipped = 0;
             let countConverted = 0;
+            let countFailed = 0;
+            let firstFailure = '';
 
             for (let item of stagedMatchedLibraryPosts) {
                 let actualType = item.mediaType;
@@ -3849,10 +3928,21 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
                 const postLocalId = 'lib_local_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
                 let localFileId = null;
+                let remoteMediaPath = '';
 
                 if (actualFile) {
                     localFileId = 'blob_' + postLocalId;
-                    await saveMediaBlobToIDB(localFileId, actualFile, actualFile.name);
+                    try {
+                        const uploaded = await mediaSync.upload(actualFile, postLocalId);
+                        if (!await saveMediaBlobToIDB(localFileId, actualFile, actualFile.name)) {
+                            throw new Error('Không thể lưu bản cục bộ của file vào IndexedDB.');
+                        }
+                        remoteMediaPath = uploaded.path;
+                    } catch (error) {
+                        countFailed++;
+                        if (!firstFailure) firstFailure = error.message || String(error);
+                        continue;
+                    }
                 }
 
                 postLibrary.unshift({
@@ -3861,7 +3951,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     mediaType: actualType || 'photo',
                     mediaSource: actualFile ? 'local_disk' : 'online_url',
                     localFileId: localFileId,
+                    remoteMediaPath: remoteMediaPath,
                     localFileName: actualFile ? actualFile.name : '',
+                    localFileMimeType: actualFile ? actualFile.type : '',
                     localFileSize: actualFile ? actualFile.size : 0,
                     videoTitle: item.videoTitle || '',
                     content: item.content,
@@ -3883,7 +3975,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             let msg = `🎉 Đã nạp thành công ${countAdded} bài viết vào Kho Photo & Video!`;
             if (countConverted > 0) msg += ` (${countConverted} bài chuyển thành Text)`;
             if (countSkipped > 0) msg += ` (${countSkipped} bài thiếu file đã bỏ qua)`;
-            showToast(msg, 'success');
+            if (countFailed > 0) msg += ` (${countFailed} file không lưu được: ${firstFailure})`;
+            showToast(msg, countFailed ? (countAdded ? 'warning' : 'error') : 'success');
         }
 
         function updateAutoSyncCycle() {
@@ -4404,11 +4497,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 try {
                     let mediaFilesToPost = [];
                     if (item.localFileId) {
-                        const blob = await getMediaBlobFromIDB(item.localFileId);
-                        if (blob) {
-                            const reconstructedFile = new File([blob], item.localFileName || 'media_upload', { type: blob.type });
-                            mediaFilesToPost = [reconstructedFile];
-                        }
+                        const blob = await getMediaBlobFromIDB(item.localFileId, item.remoteMediaPath, item.localFileName, item.localFileMimeType);
+                        if (!blob) throw new Error('Không tải được file media từ GitHub. Hãy kiểm tra GitHub Sync và kết nối mạng.');
+                        const reconstructedFile = new File([blob], item.localFileName || 'media_upload', { type: blob.type });
+                        mediaFilesToPost = [reconstructedFile];
                     }
 
                     const finalContent = parseSpintax(item.content);
@@ -4842,11 +4934,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
                     let actualFilesToSend = task.localFiles || [];
                     if (task.localFileId && (!actualFilesToSend || !actualFilesToSend.length)) {
-                        const blob = await getMediaBlobFromIDB(task.localFileId);
-                        if (blob) {
-                            const reconstructedFile = new File([blob], task.localFileName || 'media_upload', { type: blob.type });
-                            actualFilesToSend = [reconstructedFile];
-                        }
+                        const blob = await getMediaBlobFromIDB(task.localFileId, task.remoteMediaPath, task.localFileName, task.localFileMimeType);
+                        if (!blob) throw new Error('Không tải được file media từ GitHub. Hãy kiểm tra GitHub Sync và kết nối mạng.');
+                        const reconstructedFile = new File([blob], task.localFileName || 'media_upload', { type: blob.type });
+                        actualFilesToSend = [reconstructedFile];
                     }
 
                     let apiRes;
@@ -4891,7 +4982,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                 mediaType: task.mediaType,
                                 mediaUrl: task.mediaUrl,
                                 localFileId: task.localFileId || null,
+                                remoteMediaPath: task.remoteMediaPath || '',
                                 localFileName: task.localFileName || '',
+                                localFileMimeType: task.localFileMimeType || '',
                                 scheduledTime: task.scheduledTime,
                                 status: 'fb_native'
                             });
@@ -5227,7 +5320,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         mediaType: item.mediaType,
                         mediaUrl: item.mediaUrl,
                         localFileId: item.localFileId || null,
+                        remoteMediaPath: item.remoteMediaPath || '',
                         localFileName: item.localFileName || '',
+                        localFileMimeType: item.localFileMimeType || '',
                         scheduledTime: item.scheduledTime,
                         status: 'pending'
                     });
@@ -5313,7 +5408,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                             let currentMediaType = publisherType;
                             let currentMediaUrl = mediaUrl;
                             let currentLocalFileId = null;
+                            let currentRemoteMediaPath = '';
                             let currentLocalFileName = '';
+                            let currentLocalFileMimeType = '';
 
                             if (hasSelectedLibraryPosts) {
                                 const libraryItem = selectedLibraryItems[libIndex % selectedLibraryItems.length];
@@ -5321,7 +5418,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                 currentMediaType = libraryItem.mediaType || 'photo';
                                 currentMediaUrl = libraryItem.mediaPath || mediaUrl;
                                 currentLocalFileId = libraryItem.localFileId || null;
+                                currentRemoteMediaPath = libraryItem.remoteMediaPath || '';
                                 currentLocalFileName = libraryItem.localFileName || '';
+                                currentLocalFileMimeType = libraryItem.localFileMimeType || '';
                                 libIndex++;
                             }
 
@@ -5333,7 +5432,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                 mediaType: currentMediaType,
                                 mediaUrl: currentMediaUrl,
                                 localFileId: currentLocalFileId,
+                                remoteMediaPath: currentRemoteMediaPath,
                                 localFileName: currentLocalFileName,
+                                localFileMimeType: currentLocalFileMimeType,
                                 videoTitle: videoTitle,
                                 scheduledTime: finalScheduledTime
                             });
@@ -5357,7 +5458,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         mediaType: item.mediaType || 'photo',
                         mediaUrl: item.mediaPath || '',
                         localFileId: item.localFileId || null,
+                        remoteMediaPath: item.remoteMediaPath || '',
                         localFileName: item.localFileName || '',
+                        localFileMimeType: item.localFileMimeType || '',
                         localFiles: [],
                         videoTitle: item.videoTitle || videoTitle
                     });
@@ -5782,12 +5885,15 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             }
 
             if (item.localFileId) {
-                const blob = await getMediaBlobFromIDB(item.localFileId);
+                const blob = await getMediaBlobFromIDB(item.localFileId, item.remoteMediaPath, item.localFileName, item.localFileMimeType);
                 if (blob) {
                     const reconstructedFile = new File([blob], item.localFileName || 'media_upload', { type: blob.type });
                     selectedLocalFiles = [reconstructedFile];
                     setMediaSourceMode('file');
                     renderLocalMediaPreviews();
+                } else {
+                    showToast('Không tải được file media. Hãy kiểm tra GitHub Sync và kết nối mạng.', 'error');
+                    return;
                 }
             } else if (item.mediaPath) {
                 setMediaSourceMode('url');
@@ -6940,12 +7046,12 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             if (!item) return;
 
             if (item.localFileId) {
-                const blob = await getMediaBlobFromIDB(item.localFileId);
+                const blob = await getMediaBlobFromIDB(item.localFileId, item.remoteMediaPath, item.localFileName, item.localFileMimeType);
                 if (blob) {
                     const objUrl = URL.createObjectURL(blob);
                     openMediaLightbox(item.mediaType || 'photo', objUrl, item.localFileName || 'File Ổ Đĩa');
                 } else {
-                    showToast('Không tìm thấy tệp trong bộ nhớ cục bộ!', 'warning');
+                    showToast('Không tải được file media. Hãy kiểm tra GitHub Sync và kết nối mạng.', 'warning');
                 }
             } else if (item.mediaPath) {
                 openMediaLightbox(item.mediaType || 'photo', item.mediaPath, 'Media Online');
@@ -7128,6 +7234,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         function closeAddLibraryPostModal() {
+            if (document.getElementById('btn-save-library-post')?.disabled) return;
             document.getElementById('add-library-post-modal').classList.add('hidden');
             pendingLibraryMediaFile = null;
             removeExistingLibraryMedia = false;
@@ -7151,6 +7258,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         async function saveLibraryPost() {
+            const selectedMediaFile = pendingLibraryMediaFile;
             const editId = document.getElementById('edit-library-post-id').value;
             const folderId = document.getElementById('lib-post-folder-select').value || 'folder_default';
             const mediaType = document.getElementById('lib-media-type').value;
@@ -7170,22 +7278,44 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
 
             const previousLibrary = JSON.parse(JSON.stringify(postLibrary));
             const previousLocalFileId = existingItem ? existingItem.localFileId : null;
+            const postId = existingItem ? existingItem.id : 'lib_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
             let localFileId = null;
+            let remoteMediaPath = '';
             let localFileName = '';
+            let localFileMimeType = '';
             let localFileSize = 0;
 
-            if (pendingLibraryMediaFile) {
-                localFileId = 'blob_lib_' + Date.now() + '_' + Math.random().toString(36).substring(2, 8);
-                const saved = await saveMediaBlobToIDB(localFileId, pendingLibraryMediaFile, pendingLibraryMediaFile.name);
-                if (!saved) {
-                    showToast('Không thể lưu tệp vào bộ nhớ của trình duyệt. Hãy thử tệp nhỏ hơn hoặc kiểm tra dung lượng thiết bị.', 'error');
+            if (selectedMediaFile) {
+                const mediaSync = window.__GHS_MEDIA__;
+                if (!mediaSync || !mediaSync.isConfigured()) {
+                    showToast('Hãy kết nối GitHub Sync bằng nút ☁ trước khi lưu file để dùng trên máy khác.', 'error');
                     return;
                 }
-                localFileName = pendingLibraryMediaFile.name;
-                localFileSize = pendingLibraryMediaFile.size;
+                const saveButton = document.getElementById('btn-save-library-post');
+                const originalButtonText = saveButton ? saveButton.innerText : '';
+                if (saveButton) { saveButton.disabled = true; saveButton.innerText = 'Đang tải file lên GitHub…'; }
+                try {
+                    const mediaUploadId = 'media_' + Date.now() + '_' + Math.random().toString(36).substring(2, 10);
+                    const uploaded = await mediaSync.upload(selectedMediaFile, mediaUploadId);
+                    localFileId = 'blob_' + mediaUploadId;
+                    remoteMediaPath = uploaded.path;
+                    const saved = await saveMediaBlobToIDB(localFileId, selectedMediaFile, selectedMediaFile.name);
+                    if (!saved) throw new Error('Không thể lưu bản cục bộ của file vào IndexedDB.');
+                } catch (error) {
+                    if (localFileId) await deleteMediaBlobFromIDB(localFileId);
+                    showToast('Không thể lưu file vào kho dùng chung: ' + (error.message || String(error)), 'error');
+                    return;
+                } finally {
+                    if (saveButton) { saveButton.disabled = false; saveButton.innerText = originalButtonText || 'Lưu Vào Kho'; }
+                }
+                localFileName = selectedMediaFile.name;
+                localFileMimeType = selectedMediaFile.type || '';
+                localFileSize = selectedMediaFile.size;
             } else if (existingItem && existingItem.localFileId && !removeExistingLibraryMedia) {
                 localFileId = existingItem.localFileId;
+                remoteMediaPath = existingItem.remoteMediaPath || '';
                 localFileName = existingItem.localFileName || '';
+                localFileMimeType = existingItem.localFileMimeType || '';
                 localFileSize = existingItem.localFileSize || 0;
             }
 
@@ -7195,17 +7325,21 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
                 existingItem.content = content;
                 existingItem.mediaSource = localFileId ? 'local_disk' : 'online_url';
                 existingItem.localFileId = localFileId;
+                existingItem.remoteMediaPath = remoteMediaPath;
                 existingItem.localFileName = localFileName;
+                existingItem.localFileMimeType = localFileMimeType;
                 existingItem.localFileSize = localFileSize;
                 existingItem.mediaPath = localFileId ? '' : mediaPath;
             } else {
                 postLibrary.unshift({
-                    id: 'lib_' + Date.now(),
+                    id: postId,
                     folderId: folderId,
                     mediaType: mediaType,
                     mediaSource: localFileId ? 'local_disk' : 'online_url',
                     localFileId: localFileId,
+                    remoteMediaPath: remoteMediaPath,
                     localFileName: localFileName,
+                    localFileMimeType: localFileMimeType,
                     localFileSize: localFileSize,
                     content: content,
                     mediaPath: localFileId ? '' : mediaPath,
@@ -7340,7 +7474,9 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
                             mediaType: chosenItem.mediaType || 'photo',
                             mediaUrl: chosenItem.mediaPath || '',
                             localFileId: chosenItem.localFileId || null,
+                            remoteMediaPath: chosenItem.remoteMediaPath || '',
                             localFileName: chosenItem.localFileName || '',
+                            localFileMimeType: chosenItem.localFileMimeType || '',
                             videoTitle: chosenItem.videoTitle || '',
                             scheduledTime: schedDate.getTime() + jitterOffset
                         });
