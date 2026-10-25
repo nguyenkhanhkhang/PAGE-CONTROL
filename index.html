@@ -3930,8 +3930,19 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             let countConverted = 0;
             let countFailed = 0;
             let firstFailure = '';
+            const totalToImport = stagedMatchedLibraryPosts.length;
+            const updateImportProgress = (processed, note = '') => {
+                const progressNote = note || (uploadLocalMediaToGitHub
+                    ? 'đang tiếp tục tải media lên GitHub'
+                    : 'đang tiếp tục nhập media trên máy này');
+                btnConfirm.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đã lưu ${countAdded}/${totalToImport} bài · đã xử lý ${processed}/${totalToImport} · ${progressNote}`;
+            };
 
-            for (let item of stagedMatchedLibraryPosts) {
+            for (let index = 0; index < stagedMatchedLibraryPosts.length; index++) {
+                const item = stagedMatchedLibraryPosts[index];
+                updateImportProgress(index, uploadLocalMediaToGitHub
+                    ? `đang tải bài ${index + 1}/${totalToImport} lên GitHub`
+                    : `đang nhập bài ${index + 1}/${totalToImport}`);
                 let actualType = item.mediaType;
                 let actualFile = item.matchedFile;
 
@@ -3941,6 +3952,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         countConverted++;
                     } else {
                         countSkipped++;
+                        updateImportProgress(index + 1, 'đã bỏ qua bài thiếu file; tiếp tục xử lý');
                         continue;
                     }
                 }
@@ -3972,6 +3984,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     } catch (error) {
                         countFailed++;
                         if (!firstFailure) firstFailure = error.message || String(error);
+                        updateImportProgress(index + 1, 'file lỗi; tiếp tục xử lý bài kế tiếp');
                         continue;
                     }
                 }
@@ -3993,8 +4006,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 });
 
                 countAdded++;
+                savePostLibraryToStorage();
+                updateImportProgress(index + 1);
             }
 
+            // Final safety save; each successfully imported post is already persisted above.
             savePostLibraryToStorage();
             closeLocalExcelImportModal();
             renderLibraryFolderTabs();
