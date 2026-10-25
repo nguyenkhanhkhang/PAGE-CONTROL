@@ -454,12 +454,42 @@
     }
 
     function setLocal(out) {
-        silently(() => {
-            Object.keys(out).forEach(k => { if (LS.getItem(k) !== out[k]) LS.setItem(k, out[k]); });
+        const writeSnapshot = () => silently(() => {
+            // Free keys removed by the incoming snapshot before writing replacements. This matters
+            // on phones, where writing first and deleting stale values afterward can exceed quota.
             scopedKeys().forEach(k => { if (!(k in out)) LS.removeItem(k); });
+            Object.keys(out).forEach(k => { if (LS.getItem(k) !== out[k]) LS.setItem(k, out[k]); });
         });
+        try {
+            writeSnapshot();
+        } catch (error) {
+            const quotaExceeded = error && (
+                error.name === 'QuotaExceededError' || error.code === 22 || error.code === 1014 ||
+                /quota|storage.*full/i.test(error.message || '')
+            );
+            if (!quotaExceeded) throw error;
+
+            // The GitHub copy is the recovery source; release the duplicate local restore snapshot,
+            // then retry the same incoming state once.
+            try { silently(() => LS.removeItem(BACKUP_KEY)); } catch (cleanupError) { /* best effort */ }
+            try {
+                writeSnapshot();
+            } catch (retryError) {
+                const storageError = new Error('Dung lượng trình duyệt trên thiết bị đã đầy. Đã thử bỏ bản sao lưu cục bộ nhưng vẫn không đủ chỗ để nhận dữ liệu GitHub. Hãy giải phóng dung lượng của Kho trên thiết bị rồi đồng bộ lại.');
+                storageError.name = 'QuotaExceededError';
+                throw storageError;
+            }
+        }
     }
-    function backupLocal(data) { try { silently(() => LS.setItem(BACKUP_KEY, JSON.stringify({ at: Date.now(), data: data }))); } catch (e) { /* hết dung lượng thì bỏ qua */ } }
+    function backupLocal(data) {
+        try {
+            const serialized = JSON.stringify({ at: Date.now(), data: data });
+            // Large full snapshots duplicate the entire app state and frequently fill mobile storage.
+            // GitHub keeps the authoritative copy, so retain only small local restore points.
+            if (serialized.length > 262144) { silently(() => LS.removeItem(BACKUP_KEY)); return; }
+            silently(() => LS.setItem(BACKUP_KEY, serialized));
+        } catch (e) { /* hết dung lượng thì bỏ qua */ }
+    }
 
     // Một vòng đồng bộ 2 chiều. Trả về { reload } nếu dữ liệu máy này vừa được cập nhật từ GitHub.
     async function syncOnce(attempt) {
