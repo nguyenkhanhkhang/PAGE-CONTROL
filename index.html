@@ -217,19 +217,27 @@
         if (typeof FileReader !== 'undefined') {
             return new Promise((resolve, reject) => {
                 const reader = new FileReader();
+                const timeout = setTimeout(() => reader.abort(), 120000);
                 reader.onprogress = event => {
                     if (event.lengthComputable && typeof onProgress === 'function') {
                         onProgress(`đang chuẩn bị media ${Math.floor((event.loaded / event.total) * 100)}%`);
                     }
                 };
                 reader.onload = () => {
+                    clearTimeout(timeout);
                     const dataUrl = String(reader.result || '');
                     const comma = dataUrl.indexOf(',');
                     if (comma < 0) return reject(new Error('Không mã hóa được file media.'));
                     resolve(dataUrl.slice(comma + 1));
                 };
-                reader.onerror = () => reject(reader.error || new Error('Không mã hóa được file media.'));
-                reader.onabort = () => reject(new Error('Đã hủy bước chuẩn bị file media.'));
+                reader.onerror = () => {
+                    clearTimeout(timeout);
+                    reject(reader.error || new Error('Không mã hóa được file media.'));
+                };
+                reader.onabort = () => {
+                    clearTimeout(timeout);
+                    reject(new Error('Đã hết thời gian chuẩn bị file media hoặc thao tác bị hủy.'));
+                };
                 reader.readAsDataURL(blob);
             });
         }
@@ -240,16 +248,34 @@
         }
         return btoa(binary);
     }
+    async function fetchMediaWithTimeout(url, options = {}, timeoutMs = 20000) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
     function sendMediaUploadRequest(url, requestBody, onProgress) {
         return new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             xhr.open('PUT', url, true);
-            xhr.timeout = 120000;
+            xhr.timeout = 600000;
             xhr.setRequestHeader('Authorization', 'Bearer ' + cfg.token);
             xhr.setRequestHeader('Accept', 'application/vnd.github+json');
             xhr.setRequestHeader('Content-Type', 'application/json');
             let lastProgressAt = 0;
+            let stalled = false;
+            let stallTimer = null;
+            const clearStallTimer = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer = null; };
+            const resetStallTimer = () => {
+                clearStallTimer();
+                stallTimer = setTimeout(() => { stalled = true; xhr.abort(); }, 45000);
+            };
             xhr.upload.onprogress = event => {
+                resetStallTimer();
                 if (!event.lengthComputable || typeof onProgress !== 'function') return;
                 const percent = Math.floor((event.loaded / event.total) * 100);
                 if (percent === 100 || Date.now() - lastProgressAt >= 300) {
@@ -259,15 +285,23 @@
                         : `đang tải media lên GitHub ${percent}%`);
                 }
             };
-            xhr.onload = () => resolve({
-                status: xhr.status,
-                ok: xhr.status >= 200 && xhr.status < 300,
-                headers: { get: name => { try { return xhr.getResponseHeader(name); } catch (e) { return null; } } },
-                clone: () => ({ json: async () => JSON.parse(xhr.responseText || '{}') })
-            });
-            xhr.onerror = () => reject(new Error('Kết nối GitHub bị gián đoạn.'));
-            xhr.ontimeout = () => reject(new Error('GitHub không phản hồi trong 120 giây.'));
-            xhr.onabort = () => reject(new Error('Đã hủy yêu cầu tải media lên GitHub.'));
+            xhr.onreadystatechange = () => { if (xhr.readyState === 2) resetStallTimer(); };
+            xhr.onload = () => {
+                clearStallTimer();
+                resolve({
+                    status: xhr.status,
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    headers: { get: name => { try { return xhr.getResponseHeader(name); } catch (e) { return null; } } },
+                    clone: () => ({ json: async () => JSON.parse(xhr.responseText || '{}') })
+                });
+            };
+            xhr.onerror = () => { clearStallTimer(); reject(new Error('Kết nối GitHub bị gián đoạn.')); };
+            xhr.ontimeout = () => { clearStallTimer(); reject(new Error('GitHub không phản hồi trong 10 phút.')); };
+            xhr.onabort = () => {
+                clearStallTimer();
+                reject(new Error(stalled ? 'Không có tiến triển khi tải lên hoặc chờ GitHub xác nhận trong 45 giây.' : 'Đã hủy yêu cầu tải media lên GitHub.'));
+            };
+            resetStallTimer();
             xhr.send(requestBody);
         });
     }
@@ -309,8 +343,15 @@
 
             if (r.status === 409 || r.status === 422) {
                 // Một lần thử trước có thể đã ghi file nhưng mất phản hồi mạng.
-                const existing = await fetch(url + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr(), cache: 'no-store' });
-                if (existing.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+                try {
+                    const existing = await fetchMediaWithTimeout(url + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr(), cache: 'no-store' });
+                    if (existing.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+                } catch (error) {
+                    if (attempt === maxAttempts - 1) throw new Error('GitHub đã nhận file nhưng bước xác minh bị treo: ' + (error.message || String(error)));
+                    if (typeof onProgress === 'function') onProgress('đang xác minh file đã tải; tự thử lại...');
+                    await delay(Math.min(1000 * Math.pow(2, attempt), 15000));
+                    continue;
+                }
             }
             if (r.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
 
@@ -354,7 +395,34 @@
         if (!r.ok) throw mkErr(r.status);
         return r.blob();
     }
-    window.__GHS_MEDIA__ = Object.freeze({ isConfigured: configured, upload: uploadMedia, download: downloadMedia, beginBatch: beginSyncBatch, endBatch: endSyncBatch, maxBytes: MEDIA_MAX_BYTES });
+    async function listMediaFiles() {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để quét media trên GitHub.');
+        const refResponse = await fetch(repoUrl() + '/git/ref/heads/' + enc(cfg.branch), { headers: hdr(), cache: 'no-store' });
+        if (!refResponse.ok) throw mkErr(refResponse.status);
+        const refData = await refResponse.json();
+        const commitSha = refData && refData.object && refData.object.sha;
+        if (!commitSha) throw new Error('Không đọc được mã commit của nhánh GitHub hiện tại.');
+
+        const treeResponse = await fetch(repoUrl() + '/git/trees/' + encodeURIComponent(commitSha) + '?recursive=1', { headers: hdr(), cache: 'no-store' });
+        if (!treeResponse.ok) throw mkErr(treeResponse.status);
+        const treeData = await treeResponse.json();
+        if (treeData.truncated) throw new Error('Kho GitHub quá lớn để quét an toàn một lượt; chưa xóa dữ liệu nào.');
+        return (treeData.tree || [])
+            .filter(entry => entry.type === 'blob' && isSafeMediaPath(entry.path))
+            .map(entry => ({ path: entry.path, sha: entry.sha, size: entry.size || 0 }));
+    }
+    async function deleteRemoteMedia(path, sha) {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để dọn media trên GitHub.');
+        if (!isSafeMediaPath(path) || !sha) throw new Error('Đường dẫn hoặc mã file GitHub không hợp lệ.');
+        const r = await fetch(mediaApiUrl(path), {
+            method: 'DELETE',
+            headers: hdr({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ message: 'remove orphan media ' + path.split('/').pop(), sha: sha, branch: cfg.branch })
+        });
+        if (!r.ok) throw mkErr(r.status);
+        return true;
+    }
+    window.__GHS_MEDIA__ = Object.freeze({ isConfigured: configured, upload: uploadMedia, download: downloadMedia, listMediaFiles: listMediaFiles, deleteRemoteMedia: deleteRemoteMedia, beginBatch: beginSyncBatch, endBatch: endSyncBatch, maxBytes: MEDIA_MAX_BYTES });
 
     // Gộp dữ liệu 3 bên (máy này / GitHub / lần đồng bộ trước). Mỗi key xử lý riêng, không cần hỏi:
     //  - chỉ 1 bên đổi  -> lấy bên đổi
@@ -2329,6 +2397,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     </div>
                 </div>
                 <div class="flex items-center gap-2 flex-wrap">
+                    <button onclick="openMediaCleanupModal()" class="bg-slate-800 hover:bg-amber-700/60 text-amber-200 text-xs font-semibold px-3 py-2 rounded-xl transition border border-amber-500/30 shadow flex items-center gap-1.5" title="Quét blob cục bộ và media GitHub không còn bài tham chiếu">
+                        <i class="fa-solid fa-broom text-amber-300"></i> Dọn Dữ Liệu Rác
+                    </button>
                     <button onclick="openFolderManageModal()" class="bg-slate-800 hover:bg-slate-700 text-teal-300 text-xs font-semibold px-3 py-2 rounded-xl transition border border-teal-500/30 shadow flex items-center gap-1.5">
                         <i class="fa-solid fa-folder-plus text-teal-400"></i> Quản Lý Thư Mục
                     </button>
@@ -2540,6 +2611,39 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         </div>
     </div>
 
+    <!-- SAFE MEDIA GARBAGE CLEANUP MODAL -->
+    <div id="media-cleanup-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center hidden z-[130] p-3 md:p-5">
+        <div class="bg-slate-900 p-5 md:p-6 rounded-2xl shadow-2xl w-full max-w-3xl border border-amber-500/30 max-h-[92vh] overflow-y-auto animate-fade-in">
+            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-800">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-9 h-9 rounded-xl bg-amber-600/20 border border-amber-500/40 flex items-center justify-center text-amber-300"><i class="fa-solid fa-broom"></i></div>
+                    <div>
+                        <h3 class="text-sm font-bold text-white">Dọn Dữ Liệu Media Rác</h3>
+                        <p class="text-[11px] text-slate-400">Chỉ liệt kê media không còn bài viết hoặc lịch đăng tham chiếu.</p>
+                    </div>
+                </div>
+                <button onclick="closeMediaCleanupModal()" class="text-slate-400 hover:text-white p-2"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            <div class="space-y-3 text-xs">
+                <label class="flex items-start gap-2 p-3 rounded-xl bg-slate-950 border border-slate-800 cursor-pointer">
+                    <input type="checkbox" id="chk-cleanup-scan-github" class="accent-amber-500 mt-0.5">
+                    <span><b class="text-slate-200">Quét thêm media trên GitHub</b><span class="block text-[10px] text-slate-500 mt-0.5">Chỉ quét thư mục fcc-media/page-control; không tự xóa khi quét.</span></span>
+                </label>
+                <div class="flex gap-2 flex-wrap">
+                    <button id="btn-media-cleanup-scan" onclick="scanMediaGarbage()" class="bg-amber-600 hover:bg-amber-500 text-white font-bold px-4 py-2 rounded-xl transition flex items-center gap-2"><i class="fa-solid fa-magnifying-glass"></i> Quét dữ liệu rác</button>
+                    <button onclick="closeMediaCleanupModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold px-4 py-2 rounded-xl transition">Đóng</button>
+                </div>
+                <div id="media-cleanup-status" class="text-[11px] text-slate-400 min-h-5">Chưa quét. Dữ liệu chỉ bị xóa sau khi bạn xem kết quả và xác nhận.</div>
+                <div id="media-cleanup-results" class="space-y-2"></div>
+                <div id="media-cleanup-actions" class="hidden border-t border-slate-800 pt-3 space-y-3">
+                    <label class="flex items-center gap-2 text-slate-300"><input id="chk-cleanup-delete-local" type="checkbox" class="accent-amber-500" checked> Xóa blob cục bộ không còn được tham chiếu</label>
+                    <label class="flex items-center gap-2 text-slate-300"><input id="chk-cleanup-delete-github" type="checkbox" class="accent-red-500"> Xóa media mồ côi khỏi GitHub (tạo commit xóa trong repo)</label>
+                    <button id="btn-media-cleanup-run" onclick="confirmMediaGarbageCleanup()" class="w-full bg-red-700 hover:bg-red-600 disabled:bg-slate-700 disabled:text-slate-500 text-white font-bold px-4 py-2.5 rounded-xl transition" disabled><i class="fa-solid fa-trash-can mr-1"></i> Dọn mục đã chọn</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- FOLLOWER & POST LIKES ANALYTICS MODAL (TUẦN, THÁNG, NĂM) -->
     <div id="follower-analytics-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center hidden z-50 p-3 md:p-5">
         <div class="bg-slate-900 p-5 md:p-6 rounded-2xl shadow-2xl w-full max-w-6xl border border-slate-800 max-h-[92vh] overflow-y-auto animate-fade-in">
@@ -2658,6 +2762,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         let selectedLocalFiles = [];
         let scheduledQueue = [];
         let postLibrary = [];
+        let mediaCleanupScan = { localOrphans: [], remoteOrphans: [], localScanned: false, remoteScanned: false };
         let pendingLibraryMediaFile = null;
         let removeExistingLibraryMedia = false;
         let libraryFolders = [];
@@ -2784,6 +2889,200 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             } catch(e) {
                 console.error('IDB delete error:', e);
             }
+        }
+
+        async function listMediaBlobRecordsFromIDB() {
+            const db = await openLocalMediaDB();
+            return new Promise((resolve, reject) => {
+                const records = [];
+                const tx = db.transaction(IDB_STORE, 'readonly');
+                const request = tx.objectStore(IDB_STORE).openCursor();
+                request.onsuccess = () => {
+                    const cursor = request.result;
+                    if (cursor) {
+                        const value = cursor.value || {};
+                        records.push({ id: value.id, fileName: value.fileName || '', size: Number(value.size) || 0 });
+                        cursor.continue();
+                    }
+                };
+                request.onerror = () => reject(request.error || new Error('Không đọc được danh sách media cục bộ.'));
+                tx.oncomplete = () => { db.close(); resolve(records); };
+                tx.onerror = () => { db.close(); reject(tx.error || new Error('Lỗi khi quét IndexedDB.')); };
+                tx.onabort = () => { db.close(); reject(tx.error || new Error('Đã hủy quét IndexedDB.')); };
+            });
+        }
+
+        function collectMediaReferences() {
+            const localIds = new Set();
+            const remotePaths = new Set();
+            const visited = new WeakSet();
+            const visit = value => {
+                if (!value || typeof value !== 'object' || visited.has(value)) return;
+                visited.add(value);
+                if (typeof value.localFileId === 'string' && value.localFileId) localIds.add(value.localFileId);
+                if (typeof value.remoteMediaPath === 'string' && value.remoteMediaPath) remotePaths.add(value.remoteMediaPath);
+                Object.values(value).forEach(visit);
+            };
+
+            visit(postLibrary);
+            visit(scheduledQueue);
+            visit(preExecutionStagingQueue);
+            if (typeof progressEngineState !== 'undefined') visit(progressEngineState);
+            for (let i = 0; i < localStorage.length; i++) {
+                const key = localStorage.key(i);
+                if (!key) continue;
+                try { visit(JSON.parse(localStorage.getItem(key))); } catch (e) { /* bỏ qua key không phải JSON */ }
+            }
+            return { localIds, remotePaths };
+        }
+
+        function formatMediaCleanupBytes(bytes) {
+            const size = Number(bytes) || 0;
+            if (size < 1024) return `${size} B`;
+            if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
+            return `${(size / (1024 * 1024)).toFixed(1)} MB`;
+        }
+
+        function openMediaCleanupModal() {
+            mediaCleanupScan = { localOrphans: [], remoteOrphans: [], localScanned: false, remoteScanned: false };
+            document.getElementById('media-cleanup-results').innerHTML = '';
+            document.getElementById('media-cleanup-status').innerText = 'Chưa quét. Dữ liệu chỉ bị xóa sau khi bạn xem kết quả và xác nhận.';
+            document.getElementById('media-cleanup-actions').classList.add('hidden');
+            document.getElementById('chk-cleanup-scan-github').checked = false;
+            document.getElementById('media-cleanup-modal').classList.remove('hidden');
+        }
+
+        function closeMediaCleanupModal() {
+            document.getElementById('media-cleanup-modal').classList.add('hidden');
+        }
+
+        function renderMediaCleanupResults(errors = []) {
+            const results = document.getElementById('media-cleanup-results');
+            const localTotal = mediaCleanupScan.localOrphans.reduce((sum, item) => sum + item.size, 0);
+            const remoteTotal = mediaCleanupScan.remoteOrphans.reduce((sum, item) => sum + item.size, 0);
+            const sampleList = (items, getLabel) => items.length
+                ? `<ul class="mt-1 text-[10px] text-slate-500 list-disc list-inside">${items.slice(0, 8).map(item => `<li class="truncate">${escapeHtml(getLabel(item))}</li>`).join('')}${items.length > 8 ? `<li>… và ${items.length - 8} mục khác</li>` : ''}</ul>`
+                : '<div class="mt-1 text-[10px] text-emerald-400">Không tìm thấy dữ liệu rác.</div>';
+            const sections = [];
+            if (mediaCleanupScan.localScanned) {
+                sections.push(`<div class="p-3 rounded-xl bg-slate-950 border border-slate-800"><b class="text-cyan-300">IndexedDB cục bộ:</b> ${mediaCleanupScan.localOrphans.length} blob · ${formatMediaCleanupBytes(localTotal)}${sampleList(mediaCleanupScan.localOrphans, item => item.fileName || item.id)}</div>`);
+            }
+            if (mediaCleanupScan.remoteScanned) {
+                sections.push(`<div class="p-3 rounded-xl bg-slate-950 border border-slate-800"><b class="text-amber-300">GitHub:</b> ${mediaCleanupScan.remoteOrphans.length} file · ${formatMediaCleanupBytes(remoteTotal)}${sampleList(mediaCleanupScan.remoteOrphans, item => item.path)}</div>`);
+            }
+            if (errors.length) sections.push(`<div class="p-3 rounded-xl bg-red-950/40 border border-red-500/30 text-red-200">${errors.map(escapeHtml).join('<br>')}</div>`);
+            results.innerHTML = sections.join('');
+
+            const localCheck = document.getElementById('chk-cleanup-delete-local');
+            const remoteCheck = document.getElementById('chk-cleanup-delete-github');
+            localCheck.disabled = !mediaCleanupScan.localScanned || !mediaCleanupScan.localOrphans.length;
+            localCheck.checked = !localCheck.disabled;
+            remoteCheck.disabled = !mediaCleanupScan.remoteScanned || !mediaCleanupScan.remoteOrphans.length;
+            remoteCheck.checked = false;
+            document.getElementById('btn-media-cleanup-run').disabled = localCheck.disabled && remoteCheck.disabled;
+            document.getElementById('media-cleanup-actions').classList.toggle('hidden', !mediaCleanupScan.localScanned && !mediaCleanupScan.remoteScanned);
+        }
+
+        async function scanMediaGarbage() {
+            const btn = document.getElementById('btn-media-cleanup-scan');
+            const status = document.getElementById('media-cleanup-status');
+            const scanGithub = document.getElementById('chk-cleanup-scan-github').checked;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Đang quét...';
+            status.innerText = 'Đang kiểm tra media cục bộ và các bài viết/lịch đăng đang tham chiếu...';
+            mediaCleanupScan = { localOrphans: [], remoteOrphans: [], localScanned: false, remoteScanned: false };
+            const errors = [];
+            try {
+                const references = collectMediaReferences();
+                try {
+                    const localRecords = await listMediaBlobRecordsFromIDB();
+                    mediaCleanupScan.localOrphans = localRecords.filter(item => item.id && !references.localIds.has(item.id));
+                    mediaCleanupScan.localScanned = true;
+                } catch (error) {
+                    errors.push('Quét IndexedDB lỗi: ' + (error.message || String(error)));
+                }
+                if (scanGithub) {
+                    const mediaSync = window.__GHS_MEDIA__;
+                    if (!mediaSync || !mediaSync.isConfigured() || typeof mediaSync.listMediaFiles !== 'function') {
+                        errors.push('Kết nối GitHub Sync trước khi quét media trên GitHub.');
+                    } else {
+                        try {
+                            status.innerText = 'Đang quét thư mục media trên GitHub...';
+                            const remoteFiles = await mediaSync.listMediaFiles();
+                            mediaCleanupScan.remoteOrphans = remoteFiles.filter(item => !references.remotePaths.has(item.path));
+                            mediaCleanupScan.remoteScanned = true;
+                        } catch (error) {
+                            errors.push('Quét GitHub lỗi: ' + (error.message || String(error)));
+                        }
+                    }
+                }
+                renderMediaCleanupResults(errors);
+                const total = mediaCleanupScan.localOrphans.length + mediaCleanupScan.remoteOrphans.length;
+                status.innerText = `Quét xong: tìm thấy ${total} mục không còn được tham chiếu. Hãy xem danh sách trước khi dọn.`;
+                if (errors.length) status.innerText += ' Một số nguồn chưa quét được.';
+            } catch (error) {
+                status.innerText = 'Không thể quét dữ liệu: ' + (error.message || String(error));
+                showToast(status.innerText, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-magnifying-glass"></i> Quét lại dữ liệu rác';
+            }
+        }
+
+        function confirmMediaGarbageCleanup() {
+            const removeLocal = document.getElementById('chk-cleanup-delete-local').checked;
+            const removeGithub = document.getElementById('chk-cleanup-delete-github').checked;
+            if (!removeLocal && !removeGithub) {
+                showToast('Hãy chọn ít nhất một nhóm dữ liệu để dọn.', 'warning');
+                return;
+            }
+            const localCount = removeLocal ? mediaCleanupScan.localOrphans.length : 0;
+            const remoteCount = removeGithub ? mediaCleanupScan.remoteOrphans.length : 0;
+            const message = `Sẽ xóa ${localCount} blob cục bộ và ${remoteCount} file media khỏi GitHub. Chỉ mục không còn được bài viết hoặc lịch đăng tham chiếu. Tiếp tục?`;
+            showConfirmDialog('Xác nhận dọn media rác', message, () => executeMediaGarbageCleanup(removeLocal, removeGithub));
+        }
+
+        async function executeMediaGarbageCleanup(removeLocal, removeGithub) {
+            const runButton = document.getElementById('btn-media-cleanup-run');
+            const status = document.getElementById('media-cleanup-status');
+            runButton.disabled = true;
+            let removedLocal = 0;
+            let removedGithub = 0;
+            let failure = '';
+            try {
+                if (removeLocal) {
+                    const refs = collectMediaReferences();
+                    const latestLocal = await listMediaBlobRecordsFromIDB();
+                    const selectedIds = new Set(mediaCleanupScan.localOrphans.map(item => item.id));
+                    const safeLocal = latestLocal.filter(item => selectedIds.has(item.id) && !refs.localIds.has(item.id));
+                    for (let i = 0; i < safeLocal.length; i++) {
+                        status.innerText = `Đang dọn blob cục bộ ${i + 1}/${safeLocal.length}...`;
+                        if (await deleteMediaBlobFromIDB(safeLocal[i].id) === true) removedLocal++;
+                    }
+                }
+                if (removeGithub) {
+                    const mediaSync = window.__GHS_MEDIA__;
+                    if (!mediaSync || !mediaSync.isConfigured() || typeof mediaSync.deleteRemoteMedia !== 'function') throw new Error('Kết nối GitHub Sync trước khi dọn file trên GitHub.');
+                    const refs = collectMediaReferences();
+                    const latestRemote = await mediaSync.listMediaFiles();
+                    const selectedPaths = new Set(mediaCleanupScan.remoteOrphans.map(item => item.path));
+                    const safeRemote = latestRemote.filter(item => selectedPaths.has(item.path) && !refs.remotePaths.has(item.path));
+                    for (let i = 0; i < safeRemote.length; i++) {
+                        status.innerText = `Đang xóa media rác trên GitHub ${i + 1}/${safeRemote.length}...`;
+                        await mediaSync.deleteRemoteMedia(safeRemote[i].path, safeRemote[i].sha);
+                        removedGithub++;
+                        if (i < safeRemote.length - 1) await new Promise(resolve => setTimeout(resolve, 850));
+                    }
+                }
+            } catch (error) {
+                failure = error.message || String(error);
+            } finally {
+                runButton.disabled = false;
+            }
+            const summary = `Đã dọn ${removedLocal} blob cục bộ và ${removedGithub} file trên GitHub.`;
+            status.innerText = failure ? `${summary} Dừng ở lỗi: ${failure}` : summary;
+            showToast(failure ? `${summary} ${failure}` : summary, failure ? 'warning' : 'success');
+            await scanMediaGarbage();
         }
 
         // =========================================================================
