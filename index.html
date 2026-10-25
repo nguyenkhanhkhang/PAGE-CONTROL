@@ -213,7 +213,26 @@
         if (typeof path !== 'string' || !path.startsWith(MEDIA_ROOT)) return false;
         return path.split('/').every(part => part && part !== '.' && part !== '..');
     }
-    async function blobToB64(blob) {
+    async function blobToB64(blob, onProgress) {
+        if (typeof FileReader !== 'undefined') {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onprogress = event => {
+                    if (event.lengthComputable && typeof onProgress === 'function') {
+                        onProgress(`đang chuẩn bị media ${Math.floor((event.loaded / event.total) * 100)}%`);
+                    }
+                };
+                reader.onload = () => {
+                    const dataUrl = String(reader.result || '');
+                    const comma = dataUrl.indexOf(',');
+                    if (comma < 0) return reject(new Error('Không mã hóa được file media.'));
+                    resolve(dataUrl.slice(comma + 1));
+                };
+                reader.onerror = () => reject(reader.error || new Error('Không mã hóa được file media.'));
+                reader.onabort = () => reject(new Error('Đã hủy bước chuẩn bị file media.'));
+                reader.readAsDataURL(blob);
+            });
+        }
         const bytes = new Uint8Array(await blob.arrayBuffer());
         let binary = '';
         for (let i = 0; i < bytes.length; i += 0x8000) {
@@ -221,6 +240,38 @@
         }
         return btoa(binary);
     }
+    function sendMediaUploadRequest(url, requestBody, onProgress) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', url, true);
+            xhr.timeout = 120000;
+            xhr.setRequestHeader('Authorization', 'Bearer ' + cfg.token);
+            xhr.setRequestHeader('Accept', 'application/vnd.github+json');
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            let lastProgressAt = 0;
+            xhr.upload.onprogress = event => {
+                if (!event.lengthComputable || typeof onProgress !== 'function') return;
+                const percent = Math.floor((event.loaded / event.total) * 100);
+                if (percent === 100 || Date.now() - lastProgressAt >= 300) {
+                    lastProgressAt = Date.now();
+                    onProgress(percent >= 100
+                        ? 'đã gửi media 100%; đang chờ GitHub xác nhận'
+                        : `đang tải media lên GitHub ${percent}%`);
+                }
+            };
+            xhr.onload = () => resolve({
+                status: xhr.status,
+                ok: xhr.status >= 200 && xhr.status < 300,
+                headers: { get: name => { try { return xhr.getResponseHeader(name); } catch (e) { return null; } } },
+                clone: () => ({ json: async () => JSON.parse(xhr.responseText || '{}') })
+            });
+            xhr.onerror = () => reject(new Error('Kết nối GitHub bị gián đoạn.'));
+            xhr.ontimeout = () => reject(new Error('GitHub không phản hồi trong 120 giây.'));
+            xhr.onabort = () => reject(new Error('Đã hủy yêu cầu tải media lên GitHub.'));
+            xhr.send(requestBody);
+        });
+    }
+
     async function uploadMedia(file, id, onProgress) {
         if (!configured()) throw new Error('Hãy kết nối GitHub Sync trước khi lưu file để dùng trên máy khác.');
         if (!file || typeof file.size !== 'number') throw new Error('File tải lên không hợp lệ.');
@@ -234,7 +285,7 @@
         const url = mediaApiUrl(path);
         const body = {
             message: 'store uploaded media ' + safeId,
-            content: await blobToB64(file),
+            content: await blobToB64(file, onProgress),
             branch: cfg.branch
         };
         const requestBody = JSON.stringify(body);
@@ -243,21 +294,10 @@
         for (let attempt = 0; attempt < maxAttempts; attempt++) {
             let r;
             try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 120000);
-                try {
-                    const gap = 800 - (Date.now() - lastMediaRequestAt);
-                    if (gap > 0) await delay(gap);
-                    lastMediaRequestAt = Date.now();
-                    r = await fetch(url, {
-                        method: 'PUT',
-                        headers: hdr({ 'Content-Type': 'application/json' }),
-                        body: requestBody,
-                        signal: controller.signal
-                    });
-                } finally {
-                    clearTimeout(timeout);
-                }
+                const gap = 800 - (Date.now() - lastMediaRequestAt);
+                if (gap > 0) await delay(gap);
+                lastMediaRequestAt = Date.now();
+                r = await sendMediaUploadRequest(url, requestBody, onProgress);
             } catch (error) {
                 if (attempt === maxAttempts - 1) {
                     throw new Error(`Mạng bị gián đoạn khi tải "${file.name || safeName}" lên GitHub: ${error.message || 'hết thời gian chờ'}`);
