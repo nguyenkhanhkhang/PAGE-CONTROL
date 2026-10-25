@@ -63,6 +63,7 @@
     })();
 
     let syncing = false, again = false, muted = false, changeSeq = 0, lastCheckAt = 0, lastSig = '';
+    let syncBatchDepth = 0, syncBatchChanged = false;
     let pushTimer = null, retryTimer = null, watchTimer = null;
     let cur = { state: 'off', msg: '' }, ui = null;
 
@@ -206,6 +207,7 @@
     // ---------- Kho media dùng chung cho file tải lên từ máy tính ----------
     const MEDIA_ROOT = 'fcc-media/page-control/';
     const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+    let lastMediaRequestAt = 0;
     const mediaApiUrl = path => repoUrl() + '/contents/' + enc(path);
     function isSafeMediaPath(path) {
         if (typeof path !== 'string' || !path.startsWith(MEDIA_ROOT)) return false;
@@ -219,7 +221,7 @@
         }
         return btoa(binary);
     }
-    async function uploadMedia(file, id) {
+    async function uploadMedia(file, id, onProgress) {
         if (!configured()) throw new Error('Hãy kết nối GitHub Sync trước khi lưu file để dùng trên máy khác.');
         if (!file || typeof file.size !== 'number') throw new Error('File tải lên không hợp lệ.');
         if (file.size > MEDIA_MAX_BYTES) throw new Error('File vượt quá 50 MiB. Hãy dùng file nhỏ hơn hoặc lưu media ở dịch vụ lưu trữ riêng.');
@@ -235,14 +237,72 @@
             content: await blobToB64(file),
             branch: cfg.branch
         };
-        const r = await fetch(url, { method: 'PUT', headers: hdr({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
-        if (r.status === 409 || r.status === 422) {
-            // Một lần thử trước có thể đã ghi file nhưng mất phản hồi mạng.
-            const existing = await fetch(url + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr(), cache: 'no-store' });
-            if (existing.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+        const requestBody = JSON.stringify(body);
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const maxAttempts = 4;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            let r;
+            try {
+                const controller = new AbortController();
+                const timeout = setTimeout(() => controller.abort(), 120000);
+                try {
+                    const gap = 800 - (Date.now() - lastMediaRequestAt);
+                    if (gap > 0) await delay(gap);
+                    lastMediaRequestAt = Date.now();
+                    r = await fetch(url, {
+                        method: 'PUT',
+                        headers: hdr({ 'Content-Type': 'application/json' }),
+                        body: requestBody,
+                        signal: controller.signal
+                    });
+                } finally {
+                    clearTimeout(timeout);
+                }
+            } catch (error) {
+                if (attempt === maxAttempts - 1) {
+                    throw new Error(`Mạng bị gián đoạn khi tải "${file.name || safeName}" lên GitHub: ${error.message || 'hết thời gian chờ'}`);
+                }
+                if (typeof onProgress === 'function') onProgress(`mạng chập chờn; tự thử lại lần ${attempt + 2}/${maxAttempts}`);
+                await delay(Math.min(1000 * Math.pow(2, attempt), 15000));
+                continue;
+            }
+
+            if (r.status === 409 || r.status === 422) {
+                // Một lần thử trước có thể đã ghi file nhưng mất phản hồi mạng.
+                const existing = await fetch(url + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr(), cache: 'no-store' });
+                if (existing.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+            }
+            if (r.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+
+            let rateLimitMessage = '';
+            if (r.status === 403) {
+                try {
+                    const data = await r.clone().json();
+                    rateLimitMessage = data.message || '';
+                } catch (e) { /* response is not JSON */ }
+            }
+            const secondaryLimit = r.status === 403 && (
+                !!r.headers.get('Retry-After') ||
+                r.headers.get('X-RateLimit-Remaining') === '0' ||
+                /secondary rate limit|abuse detection|rate limit exceeded/i.test(rateLimitMessage)
+            );
+            const retryable = [408, 429, 500, 502, 503, 504].includes(r.status) || secondaryLimit;
+            if (retryable && attempt < maxAttempts - 1) {
+                const retryAfter = Number(r.headers.get('Retry-After') || 0);
+                const resetAt = Number(r.headers.get('X-RateLimit-Reset') || 0);
+                const waitMs = retryAfter > 0
+                    ? Math.min(retryAfter * 1000, 120000)
+                    : (r.headers.get('X-RateLimit-Remaining') === '0' && resetAt > 0
+                        ? Math.min(Math.max(resetAt * 1000 - Date.now(), 1000), 120000)
+                        : (secondaryLimit ? 60000 : Math.min(1000 * Math.pow(2, attempt), 15000)));
+                if (typeof onProgress === 'function') onProgress(`GitHub giới hạn tạm thời; chờ ${Math.ceil(waitMs / 1000)} giây rồi tự thử lại`);
+                await delay(waitMs);
+                continue;
+            }
+            if (secondaryLimit) throw new Error('GitHub đang giới hạn lượt tải media. Hãy đợi rồi thử lại. ' + rateLimitMessage);
+            throw mkErr(r.status);
         }
-        if (!r.ok) throw mkErr(r.status);
-        return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+        throw new Error('Không thể tải media lên GitHub sau nhiều lần thử.');
     }
     async function downloadMedia(path) {
         if (!configured()) throw new Error('Hãy kết nối GitHub Sync để tải media từ kho dùng chung.');
@@ -254,7 +314,7 @@
         if (!r.ok) throw mkErr(r.status);
         return r.blob();
     }
-    window.__GHS_MEDIA__ = Object.freeze({ isConfigured: configured, upload: uploadMedia, download: downloadMedia, maxBytes: MEDIA_MAX_BYTES });
+    window.__GHS_MEDIA__ = Object.freeze({ isConfigured: configured, upload: uploadMedia, download: downloadMedia, beginBatch: beginSyncBatch, endBatch: endSyncBatch, maxBytes: MEDIA_MAX_BYTES });
 
     // Gộp dữ liệu 3 bên (máy này / GitHub / lần đồng bộ trước). Mỗi key xử lý riêng, không cần hỏi:
     //  - chỉ 1 bên đổi  -> lấy bên đổi
@@ -371,6 +431,22 @@
     }
     function autoSync() { runSync().then(r => { if (r.reload) reloadOnce(); }); }
 
+    function beginSyncBatch() {
+        if (!syncBatchDepth) {
+            clearTimeout(pushTimer);
+            if (meta.dirty) syncBatchChanged = true;
+        }
+        syncBatchDepth++;
+    }
+    function endSyncBatch() {
+        if (!syncBatchDepth) return;
+        syncBatchDepth--;
+        if (!syncBatchDepth && syncBatchChanged) {
+            syncBatchChanged = false;
+            noteChange();
+        }
+    }
+
     // Gọi ngay khi app ghi/xóa dữ liệu. Chờ yên delayMs rồi đồng bộ (vào lúc trình duyệt rảnh, nên không giật khi đang dùng app).
     function noteChange() {
         if (!configured()) return;
@@ -390,21 +466,37 @@
         P.setItem = function (k, v) {
             if (this === LS && !muted) {
                 const key = String(k);
-                if (inScope(key)) { const old = this.getItem(key); oSet.apply(this, arguments); if (old !== String(v)) noteChange(); return; }
+                if (inScope(key)) {
+                    const old = this.getItem(key);
+                    oSet.apply(this, arguments);
+                    if (old !== String(v)) {
+                        if (syncBatchDepth) syncBatchChanged = true;
+                        else noteChange();
+                    }
+                    return;
+                }
             }
             return oSet.apply(this, arguments);
         };
         P.removeItem = function (k) {
             if (this === LS && !muted) {
                 const key = String(k);
-                if (inScope(key) && this.getItem(key) !== null) { oRm.apply(this, arguments); noteChange(); return; }
+                if (inScope(key) && this.getItem(key) !== null) {
+                    oRm.apply(this, arguments);
+                    if (syncBatchDepth) syncBatchChanged = true;
+                    else noteChange();
+                    return;
+                }
             }
             return oRm.apply(this, arguments);
         };
         P.clear = function () {
             const had = this === LS && !muted && scopedKeys().length > 0;
             const r = oClr.apply(this, arguments);
-            if (had) noteChange();
+            if (had) {
+                if (syncBatchDepth) syncBatchChanged = true;
+                else noteChange();
+            }
             return r;
         };
         hooked = true;
@@ -415,7 +507,7 @@
         if (watchTimer) return;
         lastSig = sig();
         watchTimer = setInterval(() => {
-            if (syncing || !configured() || document.visibilityState === 'hidden') return;
+            if (syncing || syncBatchDepth || !configured() || document.visibilityState === 'hidden') return;
             const s = sig();
             if (s !== lastSig) { lastSig = s; noteChange(); }
         }, hooked ? 20000 : 3000);
@@ -424,7 +516,12 @@
     document.addEventListener('visibilitychange', () => {
         if (!configured()) return;
         if (document.visibilityState === 'hidden') {                      // rời tab/đóng app: lưu ngay
-            const s = sig(); if (s !== lastSig) { lastSig = s; noteChange(); }
+            const s = sig();
+            if (s !== lastSig) {
+                lastSig = s;
+                if (syncBatchDepth) syncBatchChanged = true;
+                else noteChange();
+            }
             clearTimeout(pushTimer);
             if (meta.dirty) { saveMeta(); autoSync(); }
             return;
@@ -3938,7 +4035,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 btnConfirm.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đã lưu ${countAdded}/${totalToImport} bài · đã xử lý ${processed}/${totalToImport} · ${progressNote}`;
             };
 
-            for (let index = 0; index < stagedMatchedLibraryPosts.length; index++) {
+            if (mediaSync && typeof mediaSync.beginBatch === 'function') mediaSync.beginBatch();
+            try {
+                for (let index = 0; index < stagedMatchedLibraryPosts.length; index++) {
                 const item = stagedMatchedLibraryPosts[index];
                 updateImportProgress(index, uploadLocalMediaToGitHub
                     ? `đang tải bài ${index + 1}/${totalToImport} lên GitHub`
@@ -3975,10 +4074,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     localFileId = 'blob_' + postLocalId;
                     try {
                         if (uploadLocalMediaToGitHub) {
-                            const uploaded = await mediaSync.upload(actualFile, postLocalId);
+                            const uploaded = await mediaSync.upload(actualFile, postLocalId, note => updateImportProgress(index, note));
                             remoteMediaPath = uploaded.path;
                         }
-                        if (!await saveMediaBlobToIDB(localFileId, actualFile, actualFile.name)) {
+                        if (!uploadLocalMediaToGitHub && !await saveMediaBlobToIDB(localFileId, actualFile, actualFile.name)) {
                             throw new Error('Không thể lưu bản cục bộ của file vào IndexedDB.');
                         }
                     } catch (error) {
@@ -4005,13 +4104,34 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     createdAt: new Date().toLocaleString('vi-VN')
                 });
 
+                try {
+                    savePostLibraryToStorage();
+                } catch (error) {
+                    postLibrary.shift();
+                    throw error;
+                }
                 countAdded++;
-                savePostLibraryToStorage();
                 updateImportProgress(index + 1);
+                if (uploadLocalMediaToGitHub && index < totalToImport - 1) {
+                    await new Promise(resolve => setTimeout(resolve, 350));
+                }
+                }
+            } catch (error) {
+                countFailed++;
+                if (!firstFailure) firstFailure = error.message || String(error);
+                console.error('Excel import stopped:', error);
+                updateImportProgress(countAdded + countSkipped + countFailed, 'đã dừng do lỗi lưu kho hoặc xử lý: ' + (error.message || 'lỗi không xác định'));
+            } finally {
+                if (mediaSync && typeof mediaSync.endBatch === 'function') mediaSync.endBatch();
             }
 
             // Final safety save; each successfully imported post is already persisted above.
-            savePostLibraryToStorage();
+            try {
+                savePostLibraryToStorage();
+            } catch (error) {
+                countFailed++;
+                if (!firstFailure) firstFailure = error.message || String(error);
+            }
             closeLocalExcelImportModal();
             renderLibraryFolderTabs();
             renderPostLibraryTable();
