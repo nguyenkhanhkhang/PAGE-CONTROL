@@ -1070,7 +1070,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                             <input type="checkbox" id="chk-import-direct-session" onchange="toggleImportMediaStorageMode()" class="accent-emerald-500 w-4 h-4 mt-0.5 shrink-0 cursor-pointer">
                             <label for="chk-import-direct-session" class="cursor-pointer">
                                 <span class="block text-xs font-bold text-emerald-200">Dùng trực tiếp từ máy — không lưu media vào máy/GitHub</span>
-                                <span class="block text-[10px] text-slate-400 mt-0.5">Bài có tệp và file chỉ nằm trong RAM của tab; không sao chép media vào máy/GitHub. Chỉ đăng ngay được. Đóng/tải lại trang sẽ mất bài tạm và tệp; không thể hẹn giờ.</span>
+                                <span class="block text-[10px] text-slate-400 mt-0.5">Bài có tệp và file chỉ nằm trong RAM tab; không sao chép media vào máy/GitHub. Có thể đăng ngay hoặc hẹn qua FB Native. Đóng/tải lại trang sẽ mất bài tạm và tệp.</span>
                             </label>
                         </div>
 
@@ -1609,6 +1609,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                         <option value="fb_native">FB Native Cloud Scheduled (Graph API Hẹn Giờ Trực Tiếp)</option>
                         <option value="cron_queue">Hệ Thống Auto-Cron Queue Nội Bộ (Chạy Theo Giờ)</option>
                     </select>
+                    <p id="review-session-media-hint" class="hidden max-w-sm text-[10px] text-emerald-300 leading-relaxed">Bài dùng trực tiếp sẽ được gửi lên Facebook khi tạo lịch. Chọn FB Native và giữ tab mở đến khi tiến trình báo hoàn tất; sau đó Facebook giữ lịch đăng. Media không được lưu vào IndexedDB/GitHub.</p>
                 </div>
 
                 <div class="flex items-center gap-3 w-full md:w-auto">
@@ -4478,6 +4479,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         savePostLibraryToStorage();
                     } catch (error) {
                         postLibrary.shift();
+                        if (localFileId && !useDirectLocalFiles) await deleteMediaBlobFromIDB(localFileId);
                         throw error;
                     }
                 }
@@ -4514,6 +4516,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (countConverted > 0) msg += ` (${countConverted} bài chuyển thành Text)`;
             if (countSkipped > 0) msg += ` (${countSkipped} bài thiếu file đã bỏ qua)`;
             if (countFailed > 0) msg += ` (${countFailed} file không lưu được: ${firstFailure})`;
+            if (countFailed > 0 && uploadLocalMediaToGitHub && /Dung lượng lưu trữ trình duyệt/i.test(firstFailure)) msg += ' Nếu media đã lên GitHub nhưng bài chưa được lưu, hãy dùng Dọn Dữ Liệu Rác để quét file mồ côi.';
             if (useDirectLocalFiles && hasLocalMediaToUpload && countAdded > 0) msg += ' Media chỉ dùng trực tiếp trong phiên hiện tại, không lưu vào máy/GitHub.';
             else if (!uploadLocalMediaToGitHub && hasLocalMediaToUpload && countAdded > 0) msg += ' Media chỉ được lưu trên máy này.';
             showToast(msg, countFailed ? (countAdded ? 'warning' : 'error') : 'success');
@@ -5235,7 +5238,36 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
         function savePostLibraryToStorage() {
             const persistentPosts = postLibrary.filter(post => !post.sessionOnly);
-            localStorage.setItem('fb_post_library_v12', JSON.stringify(persistentPosts));
+            const serialized = JSON.stringify(persistentPosts);
+            try {
+                localStorage.setItem('fb_post_library_v12', serialized);
+            } catch (error) {
+                const quotaExceeded = error && (
+                    error.name === 'QuotaExceededError' || error.code === 22 || error.code === 1014 ||
+                    /quota|storage.*full/i.test(error.message || '')
+                );
+                if (!quotaExceeded) throw error;
+
+                // GitHub Sync keeps a full local snapshot as a convenience backup. It can duplicate
+                // the whole library and fill localStorage, so discard that recoverable copy once,
+                // then retry the real library write before asking the user to remove any posts.
+                let removedBackup = false;
+                try {
+                    if (localStorage.getItem('ghs_backup_v1') !== null) {
+                        localStorage.removeItem('ghs_backup_v1');
+                        removedBackup = true;
+                    }
+                } catch (cleanupError) { console.warn('Không dọn được bản sao lưu GitHub Sync cũ:', cleanupError); }
+
+                try {
+                    localStorage.setItem('fb_post_library_v12', serialized);
+                    if (removedBackup) showToast('Đã dọn bản sao lưu cục bộ cũ của GitHub Sync để giải phóng dung lượng.', 'warning');
+                } catch (retryError) {
+                    const storageError = new Error('Dung lượng lưu trữ trình duyệt đã đầy' + (removedBackup ? ' ngay cả sau khi dọn bản sao lưu cũ' : '') + '. Hãy xuất bản sao lưu rồi xóa bớt bài cũ trong Kho hoặc chọn chế độ dùng trực tiếp.');
+                    storageError.name = 'QuotaExceededError';
+                    throw storageError;
+                }
+            }
             updateLibraryBadgeCount();
         }
         function moveLibraryPostToPublishedFolder(postId) {
@@ -5593,10 +5625,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                 content: finalContent,
                                 mediaType: task.mediaType,
                                 mediaUrl: task.mediaUrl,
-                                localFileId: task.localFileId || null,
-                                remoteMediaPath: task.remoteMediaPath || '',
-                                localFileName: task.localFileName || '',
-                                localFileMimeType: task.localFileMimeType || '',
+                                localFileId: task.sessionOnly ? null : (task.localFileId || null),
+                                remoteMediaPath: task.sessionOnly ? '' : (task.remoteMediaPath || ''),
+                                localFileName: task.sessionOnly ? '' : (task.localFileName || ''),
+                                localFileMimeType: task.sessionOnly ? '' : (task.localFileMimeType || ''),
                                 scheduledTime: task.scheduledTime,
                                 status: 'fb_native'
                             });
@@ -5797,6 +5829,13 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
         function openReviewModal(stagedQueue) {
             preExecutionStagingQueue = stagedQueue;
+            const hasSessionOnlyMedia = stagedQueue.some(item => item.sessionOnly);
+            const engineSelect = document.getElementById('review-execution-engine');
+            const cronOption = engineSelect?.querySelector('option[value="cron_queue"]');
+            const sessionHint = document.getElementById('review-session-media-hint');
+            if (cronOption) cronOption.disabled = hasSessionOnlyMedia;
+            if (sessionHint) sessionHint.classList.toggle('hidden', !hasSessionOnlyMedia);
+            if (hasSessionOnlyMedia && engineSelect) engineSelect.value = 'fb_native';
             renderReviewModalTable();
             document.getElementById('review-schedule-modal').classList.remove('hidden');
         }
@@ -5907,6 +5946,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const engineType = document.getElementById('review-execution-engine').value;
             const validItems = preExecutionStagingQueue.filter(item => item.isValid);
 
+            if (validItems.some(item => item.sessionOnly) && engineType !== 'fb_native') {
+                showToast('Media chỉ ở RAM cần được gửi trực tiếp lên Facebook khi tạo lịch. Hãy chọn FB Native.', 'warning');
+                return;
+            }
+
             if (!validItems.length) {
                 showToast('Tất cả bài viết đang bị lỗi FB Policy! Vui lòng chỉnh lại thời gian hẹn giờ.', 'error');
                 return;
@@ -5962,10 +6006,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const selectedLibraryItems = postLibrary.filter(p => selectedPublisherLibraryPostIds.includes(p.id));
             const hasSelectedLibraryPosts = selectedLibraryItems.length > 0;
 
-            if (publishExecutionMode === 'bulk' && selectedLibraryItems.some(item => item.sessionOnly)) {
-                showToast('Bài dùng trực tiếp từ máy chỉ hỗ trợ Đăng Ngay. Hãy nạp lại bài sau khi mở trang và không chọn chế độ hẹn giờ.', 'warning');
-                return;
-            }
 
             const missingVideoMedia = selectedLibraryItems.find(item =>
                 (item.mediaType === 'video' || item.mediaType === 'reel') &&
@@ -6030,6 +6070,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                             let currentLocalFileName = '';
                             let currentLocalFileMimeType = '';
                             let currentLibraryPostId = null;
+                            let currentSessionOnly = false;
 
                             if (hasSelectedLibraryPosts) {
                                 const libraryItem = selectedLibraryItems[libIndex % selectedLibraryItems.length];
@@ -6041,7 +6082,21 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                 currentRemoteMediaPath = libraryItem.remoteMediaPath || '';
                                 currentLocalFileName = libraryItem.localFileName || '';
                                 currentLocalFileMimeType = libraryItem.localFileMimeType || '';
+                                currentSessionOnly = !!libraryItem.sessionOnly;
                                 libIndex++;
+                            } else if (selectedPublisherSourceLibraryPostId) {
+                                const libraryItem = postLibrary.find(item => item.id === selectedPublisherSourceLibraryPostId);
+                                if (libraryItem) {
+                                    currentContent = libraryItem.content || currentContent;
+                                    currentLibraryPostId = libraryItem.id;
+                                    currentMediaType = libraryItem.mediaType || currentMediaType;
+                                    currentMediaUrl = libraryItem.mediaPath || currentMediaUrl;
+                                    currentLocalFileId = libraryItem.localFileId || null;
+                                    currentRemoteMediaPath = libraryItem.remoteMediaPath || '';
+                                    currentLocalFileName = libraryItem.localFileName || '';
+                                    currentLocalFileMimeType = libraryItem.localFileMimeType || '';
+                                    currentSessionOnly = !!libraryItem.sessionOnly;
+                                }
                             }
 
                             stagedList.push({
@@ -6056,6 +6111,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                 remoteMediaPath: currentRemoteMediaPath,
                                 localFileName: currentLocalFileName,
                                 localFileMimeType: currentLocalFileMimeType,
+                                sessionOnly: currentSessionOnly,
                                 videoTitle: videoTitle,
                                 scheduledTime: finalScheduledTime
                             });
@@ -8043,10 +8099,6 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             const selectedIds = [...document.querySelectorAll('.library-post-checkbox:checked')].map(cb => cb.value);
             const items = postLibrary.filter(p => selectedIds.includes(p.id));
 
-            if (items.some(item => item.sessionOnly)) {
-                showToast('Bài dùng trực tiếp từ máy chỉ hỗ trợ Đăng Ngay; lịch ma trận cần tệp được lưu ở máy hoặc GitHub.', 'warning');
-                return;
-            }
 
             if (!items.length) {
                 showToast('Vui lòng chọn ít nhất 1 bài viết trong Kho!', 'warning');
@@ -8110,6 +8162,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
                             remoteMediaPath: chosenItem.remoteMediaPath || '',
                             localFileName: chosenItem.localFileName || '',
                             localFileMimeType: chosenItem.localFileMimeType || '',
+                            sessionOnly: !!chosenItem.sessionOnly,
                             videoTitle: chosenItem.videoTitle || '',
                             scheduledTime: schedDate.getTime() + jitterOffset
                         });
