@@ -1066,11 +1066,19 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                             <select id="import-excel-target-folder" class="bg-slate-900 border border-slate-800 rounded-lg px-2 py-1 text-teal-300 font-bold text-xs focus:outline-none"></select>
                         </div>
 
+                        <div class="flex items-start gap-2.5 bg-slate-900/70 border border-emerald-500/30 rounded-xl px-3 py-2.5">
+                            <input type="checkbox" id="chk-import-direct-session" onchange="toggleImportMediaStorageMode()" class="accent-emerald-500 w-4 h-4 mt-0.5 shrink-0 cursor-pointer">
+                            <label for="chk-import-direct-session" class="cursor-pointer">
+                                <span class="block text-xs font-bold text-emerald-200">Dùng trực tiếp từ máy — không lưu media vào máy/GitHub</span>
+                                <span class="block text-[10px] text-slate-400 mt-0.5">Bài có tệp và file chỉ nằm trong RAM của tab; không sao chép media vào máy/GitHub. Chỉ đăng ngay được. Đóng/tải lại trang sẽ mất bài tạm và tệp; không thể hẹn giờ.</span>
+                            </label>
+                        </div>
+
                         <div class="flex items-start gap-2.5 bg-slate-900/70 border border-cyan-500/30 rounded-xl px-3 py-2.5">
                             <input type="checkbox" id="chk-import-upload-github" checked class="accent-cyan-500 w-4 h-4 mt-0.5 shrink-0 cursor-pointer">
                             <label for="chk-import-upload-github" class="cursor-pointer">
                                 <span class="block text-xs font-bold text-cyan-200">Tải media lên GitHub khi nạp Kho</span>
-                                <span class="block text-[10px] text-slate-400 mt-0.5">Bỏ chọn để chỉ lưu media trên máy này. Khi bật, dùng kết nối GitHub Sync ☁ đã cấu hình; repo private vẫn được hỗ trợ.</span>
+                                <span class="block text-[10px] text-slate-400 mt-0.5">Bỏ chọn để lưu media trên máy này. Hoặc bật chế độ dùng trực tiếp phía trên để không sao chép media. GitHub dùng kết nối Sync ☁ đã cấu hình.</span>
                             </label>
                         </div>
                     </div>
@@ -2796,6 +2804,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         let localExcelRowsParsed = [];
         let loadedLocalFilesList = []; // Array of actual File objects
         let localDiskFilesMap = new Map(); // cleanName (lower) -> File
+        const sessionOnlyMediaFiles = new Map(); // File references held only in RAM for the current tab; never persisted
         let stagedMatchedLibraryPosts = [];
         let matrixActiveStatusFilter = 'all'; // 'all', 'missing', 'matched', 'fuzzy', 'text'
         let currentTargetRowForPicker = null;
@@ -2844,6 +2853,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         }
 
         async function getMediaBlobFromIDB(id, remoteMediaPath = '', fileName = '', mimeType = '') {
+            const sessionFile = id ? sessionOnlyMediaFiles.get(String(id)) : null;
+            if (sessionFile) return sessionFile;
+
             let localBlob = null;
             if (id) {
                 try {
@@ -3523,7 +3535,16 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             showToast('Đã tải File Mẫu Excel Nhập Kho Từ Ổ Đĩa Máy Tính!', 'success');
         }
 
+        function toggleImportMediaStorageMode() {
+            const directMode = document.getElementById('chk-import-direct-session')?.checked || false;
+            const githubCheckbox = document.getElementById('chk-import-upload-github');
+            const githubRow = githubCheckbox?.closest('.flex.items-start');
+            if (githubCheckbox) githubCheckbox.disabled = directMode;
+            if (githubRow) githubRow.classList.toggle('opacity-50', directMode);
+        }
+
         function openLocalExcelImportModal() {
+            toggleImportMediaStorageMode();
             populateFolderDropdownSelects();
             renderLocalExcelPreviewTable();
             document.getElementById('local-excel-import-modal').classList.remove('hidden');
@@ -4348,7 +4369,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 return;
             }
 
-            const uploadLocalMediaToGitHub = document.getElementById('chk-import-upload-github')?.checked ?? true;
+            const useDirectLocalFiles = document.getElementById('chk-import-direct-session')?.checked ?? false;
+            const uploadLocalMediaToGitHub = !useDirectLocalFiles && (document.getElementById('chk-import-upload-github')?.checked ?? true);
             const hasLocalMediaToUpload = stagedMatchedLibraryPosts.some(item => !!item.matchedFile);
             const mediaSync = window.__GHS_MEDIA__;
             if (uploadLocalMediaToGitHub && hasLocalMediaToUpload && (!mediaSync || !mediaSync.isConfigured())) {
@@ -4357,9 +4379,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             }
 
             btnConfirm.disabled = true;
-            btnConfirm.innerHTML = uploadLocalMediaToGitHub
-                ? '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài và tải media lên GitHub...'
-                : '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài và media trên máy này...';
+            btnConfirm.innerHTML = useDirectLocalFiles
+                ? '<i class="fa-solid fa-spinner fa-spin"></i> Đang nạp bài, giữ tệp trong phiên...'
+                : uploadLocalMediaToGitHub
+                    ? '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài và tải media lên GitHub...'
+                    : '<i class="fa-solid fa-spinner fa-spin"></i> Đang lưu bài và media trên máy này...';
 
             let countAdded = 0;
             let countSkipped = 0;
@@ -4368,13 +4392,16 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             let firstFailure = '';
             const totalToImport = stagedMatchedLibraryPosts.length;
             const updateImportProgress = (processed, note = '') => {
-                const progressNote = note || (uploadLocalMediaToGitHub
-                    ? 'đang tiếp tục tải media lên GitHub'
-                    : 'đang tiếp tục nhập media trên máy này');
-                btnConfirm.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> Đã lưu ${countAdded}/${totalToImport} bài · đã xử lý ${processed}/${totalToImport} · ${progressNote}`;
+                const progressNote = note || (useDirectLocalFiles
+                    ? 'đang giữ tệp trực tiếp trong bộ nhớ phiên'
+                    : uploadLocalMediaToGitHub
+                        ? 'đang tiếp tục tải media lên GitHub'
+                        : 'đang tiếp tục nhập media trên máy này');
+                const progressLabel = useDirectLocalFiles ? 'Đã nạp phiên' : 'Đã lưu';
+                btnConfirm.innerHTML = `<i class="fa-solid fa-spinner fa-spin"></i> ${progressLabel} ${countAdded}/${totalToImport} bài · đã xử lý ${processed}/${totalToImport} · ${progressNote}`;
             };
 
-            if (mediaSync && typeof mediaSync.beginBatch === 'function') mediaSync.beginBatch();
+            if (uploadLocalMediaToGitHub && mediaSync && typeof mediaSync.beginBatch === 'function') mediaSync.beginBatch();
             try {
                 for (let index = 0; index < stagedMatchedLibraryPosts.length; index++) {
                 const item = stagedMatchedLibraryPosts[index];
@@ -4412,11 +4439,12 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 if (actualFile) {
                     localFileId = 'blob_' + postLocalId;
                     try {
-                        if (uploadLocalMediaToGitHub) {
+                        if (useDirectLocalFiles) {
+                            sessionOnlyMediaFiles.set(localFileId, actualFile);
+                        } else if (uploadLocalMediaToGitHub) {
                             const uploaded = await mediaSync.upload(actualFile, postLocalId, note => updateImportProgress(index, note));
                             remoteMediaPath = uploaded.path;
-                        }
-                        if (!uploadLocalMediaToGitHub && !await saveMediaBlobToIDB(localFileId, actualFile, actualFile.name)) {
+                        } else if (!await saveMediaBlobToIDB(localFileId, actualFile, actualFile.name)) {
                             throw new Error('Không thể lưu bản cục bộ của file vào IndexedDB.');
                         }
                     } catch (error) {
@@ -4427,11 +4455,13 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     }
                 }
 
+                const sessionOnlyPost = useDirectLocalFiles && !!actualFile;
                 postLibrary.unshift({
                     id: postLocalId,
                     folderId: targetFolderId,
                     mediaType: actualType || 'photo',
                     mediaSource: actualFile ? 'local_disk' : 'online_url',
+                    sessionOnly: sessionOnlyPost,
                     localFileId: localFileId,
                     remoteMediaPath: remoteMediaPath,
                     localFileName: actualFile ? actualFile.name : '',
@@ -4443,11 +4473,13 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     createdAt: new Date().toLocaleString('vi-VN')
                 });
 
-                try {
-                    savePostLibraryToStorage();
-                } catch (error) {
-                    postLibrary.shift();
-                    throw error;
+                if (!sessionOnlyPost) {
+                    try {
+                        savePostLibraryToStorage();
+                    } catch (error) {
+                        postLibrary.shift();
+                        throw error;
+                    }
                 }
                 countAdded++;
                 updateImportProgress(index + 1);
@@ -4461,10 +4493,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 console.error('Excel import stopped:', error);
                 updateImportProgress(countAdded + countSkipped + countFailed, 'đã dừng do lỗi lưu kho hoặc xử lý: ' + (error.message || 'lỗi không xác định'));
             } finally {
-                if (mediaSync && typeof mediaSync.endBatch === 'function') mediaSync.endBatch();
+                if (uploadLocalMediaToGitHub && mediaSync && typeof mediaSync.endBatch === 'function') mediaSync.endBatch();
             }
 
-            // Final safety save; each successfully imported post is already persisted above.
+            // Session-only media is excluded by savePostLibraryToStorage; keep post text metadata persisted.
             try {
                 savePostLibraryToStorage();
             } catch (error) {
@@ -4482,7 +4514,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (countConverted > 0) msg += ` (${countConverted} bài chuyển thành Text)`;
             if (countSkipped > 0) msg += ` (${countSkipped} bài thiếu file đã bỏ qua)`;
             if (countFailed > 0) msg += ` (${countFailed} file không lưu được: ${firstFailure})`;
-            if (!uploadLocalMediaToGitHub && hasLocalMediaToUpload && countAdded > 0) msg += ' Media chỉ được lưu trên máy này.';
+            if (useDirectLocalFiles && hasLocalMediaToUpload && countAdded > 0) msg += ' Media chỉ dùng trực tiếp trong phiên hiện tại, không lưu vào máy/GitHub.';
+            else if (!uploadLocalMediaToGitHub && hasLocalMediaToUpload && countAdded > 0) msg += ' Media chỉ được lưu trên máy này.';
             showToast(msg, countFailed ? (countAdded ? 'warning' : 'error') : 'success');
         }
 
@@ -5201,7 +5234,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         }
 
         function savePostLibraryToStorage() {
-            localStorage.setItem('fb_post_library_v12', JSON.stringify(postLibrary));
+            const persistentPosts = postLibrary.filter(post => !post.sessionOnly);
+            localStorage.setItem('fb_post_library_v12', JSON.stringify(persistentPosts));
             updateLibraryBadgeCount();
         }
         function moveLibraryPostToPublishedFolder(postId) {
@@ -5928,6 +5962,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const selectedLibraryItems = postLibrary.filter(p => selectedPublisherLibraryPostIds.includes(p.id));
             const hasSelectedLibraryPosts = selectedLibraryItems.length > 0;
 
+            if (publishExecutionMode === 'bulk' && selectedLibraryItems.some(item => item.sessionOnly)) {
+                showToast('Bài dùng trực tiếp từ máy chỉ hỗ trợ Đăng Ngay. Hãy nạp lại bài sau khi mở trang và không chọn chế độ hẹn giờ.', 'warning');
+                return;
+            }
+
             const missingVideoMedia = selectedLibraryItems.find(item =>
                 (item.mediaType === 'video' || item.mediaType === 'reel') &&
                 !item.localFileId && (!item.mediaPath || isImageMediaUrl(item.mediaPath) || isFacebookPostPageUrl(item.mediaPath))
@@ -6477,7 +6516,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     setMediaSourceMode('file');
                     renderLocalMediaPreviews();
                 } else {
-                    showToast('Không tìm thấy file media cục bộ hoặc trên GitHub. Nếu file được nhập ở máy khác, hãy bật tải media lên GitHub khi nhập.', 'error');
+                    showToast(item.sessionOnly ? 'Tệp dùng trực tiếp không còn trong phiên này. Hãy mở lại trang và nạp lại Excel/tệp từ máy.' : 'Không tìm thấy file media cục bộ hoặc trên GitHub. Nếu file được nhập ở máy khác, hãy bật tải media lên GitHub khi nhập.', 'error');
                     return;
                 }
             } else if (item.mediaPath) {
@@ -7667,6 +7706,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
                                 <span class="bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 px-2 py-0.5 rounded text-[10px] font-mono font-bold flex items-center gap-1">
                                     <i class="fa-solid fa-hard-drive"></i> Ổ Đĩa: ${escapeHtml(item.localFileName || 'File')}
                                 </span>
+                                ${item.sessionOnly ? '<span class="bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded text-[10px] font-bold">CHỈ PHIÊN NÀY</span>' : ''}
                                 <button type="button" onclick="previewLibraryItemMedia('${item.id}')" class="text-[10px] text-teal-400 hover:underline flex items-center gap-0.5">
                                     <i class="fa-solid fa-eye"></i> Xem file
                                 </button>
@@ -7953,7 +7993,8 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
 
         async function deleteLibraryPost(id) {
             const item = postLibrary.find(p => p.id === id);
-            if (item && item.localFileId) {
+            if (item && item.sessionOnly && item.localFileId) sessionOnlyMediaFiles.delete(String(item.localFileId));
+            if (item && item.localFileId && !item.sessionOnly) {
                 await deleteMediaBlobFromIDB(item.localFileId);
             }
             postLibrary = postLibrary.filter(p => p.id !== id);
@@ -7970,7 +8011,8 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             showConfirmDialog('Xóa nhiều bài viết Kho', `Bạn có chắc chắn muốn xóa ${selectedIds.length} bài viết đã chọn?`, async () => {
                 for (let id of selectedIds) {
                     const item = postLibrary.find(p => p.id === id);
-                    if (item && item.localFileId) {
+                    if (item && item.sessionOnly && item.localFileId) sessionOnlyMediaFiles.delete(String(item.localFileId));
+                    if (item && item.localFileId && !item.sessionOnly) {
                         await deleteMediaBlobFromIDB(item.localFileId);
                     }
                 }
@@ -8000,6 +8042,11 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         function generateMatrixScheduleFromLibrary(mode = 'sequential') {
             const selectedIds = [...document.querySelectorAll('.library-post-checkbox:checked')].map(cb => cb.value);
             const items = postLibrary.filter(p => selectedIds.includes(p.id));
+
+            if (items.some(item => item.sessionOnly)) {
+                showToast('Bài dùng trực tiếp từ máy chỉ hỗ trợ Đăng Ngay; lịch ma trận cần tệp được lưu ở máy hoặc GitHub.', 'warning');
+                return;
+            }
 
             if (!items.length) {
                 showToast('Vui lòng chọn ít nhất 1 bài viết trong Kho!', 'warning');
