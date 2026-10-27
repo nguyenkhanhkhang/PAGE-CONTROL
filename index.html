@@ -1425,10 +1425,19 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     <span id="page-count-badge" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">0 Page</span>
                 </div>
 
-                <div id="bulk-delete-bar" class="hidden items-center gap-3 bg-red-950/40 border border-red-500/40 px-3.5 py-1.5 rounded-xl animate-fade-in">
+                <div id="bulk-delete-bar" class="hidden flex-wrap items-center gap-2.5 bg-slate-950 border border-indigo-500/30 px-3 py-2 rounded-xl animate-fade-in max-w-full">
                     <div class="flex items-center gap-1.5 text-xs font-bold text-red-300">
                         <i class="fa-solid fa-square-check text-red-400"></i>
                         <span id="selected-pages-count">0</span> Page đã chọn
+                    </div>
+                    <div class="flex flex-wrap items-center gap-1.5 rounded-lg border border-indigo-500/20 bg-indigo-950/20 px-2 py-1.5">
+                        <span class="text-[10px] font-bold text-indigo-200">Chuyển vào lô:</span>
+                        <select id="bulk-page-batch-target" class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-100 focus:outline-none focus:border-indigo-400">
+                            <option value="">Chọn lô đích...</option>
+                        </select>
+                        <button onclick="moveSelectedPagesToBatch()" class="bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition">Chuyển Page</button>
+                        <input id="bulk-page-new-batch-name" type="text" maxlength="80" placeholder="Tên lô mới..." class="w-32 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5 text-[10px] text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-400">
+                        <button onclick="moveSelectedPagesToNewBatch()" class="bg-emerald-700 hover:bg-emerald-600 text-white text-[10px] font-bold px-2.5 py-1.5 rounded-lg transition">Tạo lô & chuyển</button>
                     </div>
                     <button onclick="deleteSelectedPages()" class="bg-red-600 hover:bg-red-500 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition shadow-lg shadow-red-950/60 flex items-center gap-1.5 glow-red">
                         <i class="fa-solid fa-trash-can"></i> Xóa các Page đã chọn
@@ -5089,8 +5098,82 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             updatePageSelectionState();
         }
 
+        function populateBulkPageBatchTargets() {
+            const select = document.getElementById('bulk-page-batch-target');
+            if (!select) return;
+            const currentValue = select.value;
+            const batches = getPublisherPageBatches();
+            select.innerHTML = '<option value="">Chọn lô đích...</option>' + batches.map(batch => `
+                <option value="${escapeHtml(batch.key)}">${escapeHtml(batch.name)} (${batch.pageIds.length} Page)</option>
+            `).join('');
+            select.value = batches.some(batch => batch.key === currentValue) ? currentValue : '';
+        }
+        function assignSelectedPagesToBatch(targetBatch) {
+            const selectedIds = new Set([...document.querySelectorAll('.page-row-checkbox:checked')].map(cb => cb.value));
+            if (!selectedIds.size) {
+                showToast('Vui lòng chọn ít nhất 1 Page trước khi chuyển lô!', 'warning');
+                return;
+            }
+            const selectedPages = pagesList.filter(page => selectedIds.has(String(page.id)));
+            const pagesToMove = selectedPages.filter(page => getPageImportBatchKey(page) !== targetBatch.key);
+            if (!pagesToMove.length) {
+                showToast(`Các Page đã chọn hiện đều thuộc lô "${targetBatch.name}".`, 'info');
+                return;
+            }
+            pagesToMove.forEach(page => {
+                if (targetBatch.key === '__unbatched__') {
+                    delete page.importBatchId;
+                    delete page.importBatchName;
+                } else {
+                    page.importBatchId = targetBatch.key;
+                    page.importBatchName = targetBatch.name;
+                }
+            });
+            savePagesToStorage();
+            const newBatchInput = document.getElementById('bulk-page-new-batch-name');
+            if (newBatchInput) newBatchInput.value = '';
+            renderPages();
+            showToast(`Đã chuyển ${pagesToMove.length} Page vào lô "${targetBatch.name}".`, 'success');
+        }
+        function moveSelectedPagesToBatch() {
+            const targetKey = document.getElementById('bulk-page-batch-target')?.value || '';
+            if (!targetKey) {
+                showToast('Vui lòng chọn lô đích!', 'warning');
+                return;
+            }
+            const targetBatch = getPublisherPageBatches().find(batch => batch.key === targetKey);
+            if (!targetBatch) {
+                showToast('Không tìm thấy lô đích. Hãy chọn lại lô.', 'warning');
+                populateBulkPageBatchTargets();
+                return;
+            }
+            assignSelectedPagesToBatch(targetBatch);
+        }
+        function moveSelectedPagesToNewBatch() {
+            const input = document.getElementById('bulk-page-new-batch-name');
+            const name = String(input?.value || '').trim();
+            if (!name) {
+                showToast('Vui lòng nhập tên lô mới!', 'warning');
+                input?.focus();
+                return;
+            }
+            const existingBatch = getPublisherPageBatches().find(batch => batch.name.trim().toLocaleLowerCase() === name.toLocaleLowerCase());
+            const targetBatch = existingBatch || {
+                key: `page_batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+                name
+            };
+            assignSelectedPagesToBatch(targetBatch);
+        }
+
         function updatePageSelectionState() {
-            const selectedBoxes = document.querySelectorAll('.page-row-checkbox:checked');
+            const allBoxes = [...document.querySelectorAll('.page-row-checkbox')];
+            const selectedBoxes = allBoxes.filter(cb => cb.checked);
+            const masterCheckbox = document.getElementById('select-all-pages');
+            if (masterCheckbox) {
+                masterCheckbox.checked = allBoxes.length > 0 && selectedBoxes.length === allBoxes.length;
+                masterCheckbox.indeterminate = selectedBoxes.length > 0 && selectedBoxes.length < allBoxes.length;
+            }
+            populateBulkPageBatchTargets();
             const bulkBar = document.getElementById('bulk-delete-bar');
             const countLabel = document.getElementById('selected-pages-count');
 
