@@ -1387,6 +1387,9 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     </select>
                 </div>
 
+                <select id="page-batch-filter" onchange="renderPages()" class="bg-slate-950 border border-indigo-500/30 rounded-xl px-3 py-2.5 text-xs text-indigo-200 focus:outline-none">
+                    <option value="all">Lô import: Tất cả</option>
+                </select>
                 <select id="follower-growth-filter" onchange="renderPages()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-300 focus:outline-none">
                     <option value="all">Xu Hướng: Tất cả</option>
                     <option value="growing">📈 Đang tăng trưởng (> 0)</option>
@@ -1845,13 +1848,17 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
 
                     <div>
                         <div class="flex justify-between items-center mb-1">
-                            <label class="block text-slate-300 font-bold">2. Fanpage nhận bài đăng:</label>
+                            <div class="flex justify-between items-center mb-1.5">
+                                <label class="block text-slate-300 font-bold">2. Fanpage nhận bài đăng:</label>
+                                <span id="publisher-selected-pages-count" class="text-[10px] font-bold text-orange-300 font-mono">Đã chọn: 0 / 0 Page</span>
+                            </div>
                             <div class="flex gap-2">
                                 <button onclick="selectAllPublisherPages(true)" class="text-[11px] text-blue-400 hover:underline font-semibold">Chọn tất cả</button>
                                 <span class="text-slate-700">|</span>
                                 <button onclick="selectAllPublisherPages(false)" class="text-[11px] text-slate-400 hover:underline">Bỏ chọn</button>
                             </div>
                         </div>
+                        <div id="publisher-page-batch-controls" class="flex flex-wrap gap-1.5"></div>
                         <div id="publisher-pages-list" class="space-y-1.5 max-h-32 overflow-y-auto bg-slate-950 border border-slate-800 rounded-xl p-2"></div>
                     </div>
 
@@ -2292,6 +2299,11 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     <strong>Tự động phân tách Page Token chuẩn xác:</strong> Nhập User / App Token. Hệ thống sẽ tự gọi API <code class="bg-slate-950 px-1 py-0.5 rounded font-mono text-emerald-300">/me/accounts</code> và lấy danh sách Page.
                 </div>
                 <div>
+                    <label class="block text-slate-300 font-semibold mb-1">Tên lô Page cho lần import này:</label>
+                    <input id="import-token-batch-name" type="text" maxlength="80" placeholder="Ví dụ: Lô Page cửa hàng miền Bắc" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500">
+                    <p class="text-[10px] text-slate-500 mt-1">Các Page được lưu từ lần quét này sẽ cùng thuộc lô.</p>
+                </div>
+                <div>
                     <label class="block text-slate-300 font-semibold mb-1">Dán User / App Access Token (Mỗi dòng 1 Token):</label>
                     <textarea id="import-user-token-input" rows="3"
                         placeholder="Dán User/App Token vào đây...
@@ -2326,6 +2338,11 @@ EAAG..."
 
             <div id="import-tab-manual" class="space-y-4 text-xs hidden">
                 <p class="text-xs text-slate-400">Định dạng mỗi dòng: <code class="bg-slate-950 px-1.5 py-0.5 rounded text-emerald-300 font-mono">Tên Page | Page ID | Token</code></p>
+                <div>
+                    <label class="block text-slate-300 font-semibold mb-1">Tên lô Page cho lần import này:</label>
+                    <input id="import-manual-batch-name" type="text" maxlength="80" placeholder="Ví dụ: Lô Page cửa hàng miền Bắc" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500">
+                    <p class="text-[10px] text-slate-500 mt-1">Các Page được lưu từ lần import này sẽ cùng thuộc lô.</p>
+                </div>
                 <textarea id="import-pages-data" rows="7"
                     placeholder="Page Thời Trang | 100000000000001 | EAAB...
 Page Mỹ Phẩm | 100000000000002 | EAAB..."
@@ -4702,19 +4719,86 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (!list) return;
             if (!pagesList.length) {
                 list.innerHTML = '<div class="text-slate-500 text-xs p-2">Chưa có Fanpage nào trong hệ thống.</div>';
+                renderPublisherPageBatchControls();
+                updatePublisherPageSelectionUI();
                 return;
             }
             list.innerHTML = pagesList.map(p => `
                 <label class="flex items-center justify-between p-2 rounded-xl bg-slate-900 hover:bg-slate-800 transition cursor-pointer">
                     <div class="flex items-center gap-2 min-w-0">
-                        <input type="checkbox" value="${p.id}" onchange="updatePublisherPreview(); updatePublisherNowLibraryDistributionControl()" class="publisher-page-checkbox accent-orange-500 w-4 h-4 rounded cursor-pointer" checked>
+                        <input type="checkbox" value="${p.id}" onchange="updatePublisherPageSelectionUI(); updatePublisherPreview(); updatePublisherNowLibraryDistributionControl()" class="publisher-page-checkbox accent-orange-500 w-4 h-4 rounded cursor-pointer" checked>
                         <span class="font-bold text-white text-xs truncate">${escapeHtml(p.name)}</span>
                     </div>
                     <span class="text-[10px] text-slate-500 font-mono">ID: ${p.pageId}</span>
                 </label>
             `).join('');
+            renderPublisherPageBatchControls();
+            updatePublisherPageSelectionUI();
         }
 
+        function getPageImportBatchKey(page) {
+            return page.importBatchId ? String(page.importBatchId) : '__unbatched__';
+        }
+
+        function getPublisherPageBatches() {
+            const batches = new Map();
+            pagesList.forEach(page => {
+                const key = getPageImportBatchKey(page);
+                if (!batches.has(key)) {
+                    batches.set(key, {
+                        key,
+                        name: String(page.importBatchName || '').trim() || 'Page chưa phân lô',
+                        pageIds: []
+                    });
+                }
+                batches.get(key).pageIds.push(String(page.id));
+            });
+            return [...batches.values()];
+        }
+
+        function renderPublisherPageBatchControls() {
+            const wrap = document.getElementById('publisher-page-batch-controls');
+            if (!wrap) return;
+            const batches = getPublisherPageBatches();
+            if (!batches.length) {
+                wrap.innerHTML = '';
+                return;
+            }
+            wrap.innerHTML = '<span class="text-[10px] text-slate-500 self-center">Chọn nhanh theo lô:</span>' + batches.map(batch => `
+                <label class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-950/40 border border-indigo-500/25 text-[10px] text-indigo-200 cursor-pointer hover:bg-indigo-900/50 transition">
+                    <input type="checkbox" data-batch-key="${escapeHtml(batch.key)}" onchange="setPublisherPageBatchSelection(this.dataset.batchKey, this.checked)" class="publisher-batch-checkbox accent-indigo-400 w-3.5 h-3.5 rounded cursor-pointer">
+                    <span class="max-w-48 truncate">${escapeHtml(batch.name)}</span>
+                    <span class="text-indigo-300/70 font-mono">(${batch.pageIds.length})</span>
+                </label>
+            `).join('');
+            updatePublisherPageSelectionUI();
+        }
+
+        function updatePublisherPageSelectionUI() {
+            const pageCheckboxes = [...document.querySelectorAll('.publisher-page-checkbox')];
+            const selectedIds = new Set(pageCheckboxes.filter(cb => cb.checked).map(cb => cb.value));
+            const selectedCount = pageCheckboxes.filter(cb => cb.checked).length;
+            const countLabel = document.getElementById('publisher-selected-pages-count');
+            if (countLabel) countLabel.innerText = `Đã chọn: ${selectedCount} / ${pageCheckboxes.length} Page`;
+
+            document.querySelectorAll('.publisher-batch-checkbox').forEach(batchCheckbox => {
+                const batchPages = pagesList.filter(page => getPageImportBatchKey(page) === batchCheckbox.dataset.batchKey);
+                const batchSelectedCount = batchPages.filter(page => selectedIds.has(String(page.id))).length;
+                batchCheckbox.checked = batchPages.length > 0 && batchSelectedCount === batchPages.length;
+                batchCheckbox.indeterminate = batchSelectedCount > 0 && batchSelectedCount < batchPages.length;
+            });
+        }
+
+        function setPublisherPageBatchSelection(batchKey, checked) {
+            const pageMap = new Map(pagesList.map(page => [String(page.id), page]));
+            document.querySelectorAll('.publisher-page-checkbox').forEach(cb => {
+                const page = pageMap.get(cb.value);
+                if (page && getPageImportBatchKey(page) === batchKey) cb.checked = checked;
+            });
+            updatePublisherPageSelectionUI();
+            updatePublisherPreview();
+            updatePublisherNowLibraryDistributionControl();
+        }
         // Trả về danh sách mediaType được phép hiển thị trong Kho theo loại bài đang đăng.
         // 'photo' -> chỉ bài PHOTO. 'video'/'reel' -> chỉ bài dạng VIDEO (gồm Video & Reel).
         // 'post'/'link' -> không lọc định dạng (cho phép chọn cả bài Text làm nội dung mẫu).
@@ -4871,6 +4955,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
         function selectAllPublisherPages(checked) {
             document.querySelectorAll('.publisher-page-checkbox').forEach(cb => cb.checked = checked);
+            updatePublisherPageSelectionUI();
             updatePublisherPreview();
             updatePublisherNowLibraryDistributionControl();
         }
@@ -7114,10 +7199,22 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             });
         }
 
+        function populatePageBatchFilter() {
+            const select = document.getElementById('page-batch-filter');
+            if (!select) return;
+            const currentValue = select.value || 'all';
+            const batches = getPublisherPageBatches();
+            select.innerHTML = '<option value="all">Lô import: Tất cả</option>' + batches.map(batch => `
+                <option value="${escapeHtml(batch.key)}">${escapeHtml(batch.name)} (${batch.pageIds.length} Page)</option>
+            `).join('');
+            select.value = batches.some(batch => batch.key === currentValue) ? currentValue : 'all';
+        }
         function renderPages() {
             const tbody = document.getElementById('pages-table-body');
             const emptyState = document.getElementById('empty-state');
             const badge = document.getElementById('page-count-badge');
+            populatePageBatchFilter();
+            const batchFilter = document.getElementById('page-batch-filter')?.value || 'all';
             
             const searchVal = (document.getElementById('page-search')?.value || '').toLowerCase();
             const periodVal = document.getElementById('follower-period-select')?.value || 'day';
@@ -7126,6 +7223,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const sortBy = document.getElementById('page-sort')?.value || 'name';
 
             let filtered = pagesList.filter(p => {
+                if (batchFilter !== 'all' && getPageImportBatchKey(p) !== batchFilter) return false;
                 const matchSearch = p.name.toLowerCase().includes(searchVal) || p.pageId.includes(searchVal);
                 if (!matchSearch) return false;
 
@@ -7211,6 +7309,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                 <div class="min-w-0">
                                     <a href="https://facebook.com/${p.pageId}" target="_blank" class="font-bold text-white text-xs hover:text-blue-400 transition truncate block">${escapeHtml(p.name)}</a>
                                     <span class="text-[10px] text-slate-500 font-mono">ID: ${p.pageId}</span>
+                                    <span class="text-[9px] text-indigo-300 truncate block mt-0.5">Lô: ${escapeHtml(p.importBatchName || 'Page chưa phân lô')}</span>
                                 </div>
                             </div>
                         </td>
@@ -7427,7 +7526,28 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             });
         }
 
-        function openImportModal() { document.getElementById('import-modal').classList.remove('hidden'); }
+        function makeDefaultPageImportBatchName() {
+            const now = new Date();
+            const date = now.toLocaleDateString('vi-VN');
+            const time = now.toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+            return `Lô import ${date} ${time}`;
+        }
+
+        function createPageImportBatch(inputId) {
+            const input = document.getElementById(inputId);
+            const name = String(input?.value || '').trim() || makeDefaultPageImportBatchName();
+            if (input && !input.value.trim()) input.value = name;
+            return { id: `page_batch_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`, name };
+        }
+
+        function openImportModal() {
+            const batchTimeLabel = makeDefaultPageImportBatchName().replace(/^Lô import /, '');
+            ['import-token-batch-name', 'import-manual-batch-name'].forEach(id => {
+                const input = document.getElementById(id);
+                if (input) input.value = `${id === 'import-token-batch-name' ? 'Lô quét Token' : 'Lô thủ công'} ${batchTimeLabel}`;
+            });
+            document.getElementById('import-modal').classList.remove('hidden');
+        }
         function closeImportModal() { document.getElementById('import-modal').classList.add('hidden'); }
 
         function switchImportTab(tab) {
@@ -7525,6 +7645,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             }
 
             let added = 0;
+            const importBatch = createPageImportBatch('import-token-batch-name');
             selected.forEach(p => {
                 const exist = pagesList.find(x => x.pageId === p.pageId);
                 if (!exist) {
@@ -7533,6 +7654,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         name: p.name,
                         pageId: p.pageId,
                         token: p.token,
+                        importBatchId: importBatch.id,
+                        importBatchName: importBatch.name,
                         currentFollowers: 0,
                         postLikesToday: 0,
                         postLikesWeek: 0,
@@ -7557,6 +7680,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
             const lines = raw.split('\n');
             let added = 0;
+            const importBatch = createPageImportBatch('import-manual-batch-name');
 
             lines.forEach(line => {
                 const parts = line.split('|').map(s => s.trim());
@@ -7571,6 +7695,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                             name: name,
                             pageId: pageId,
                             token: token,
+                            importBatchId: importBatch.id,
+                            importBatchName: importBatch.name,
                             currentFollowers: 0,
                             postLikesToday: 0,
                             postLikesWeek: 0,
