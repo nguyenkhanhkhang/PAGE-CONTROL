@@ -837,9 +837,6 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
     <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- FontAwesome Pro Free Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Chart.js for Multi-Period Analytics -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-    
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -867,7 +864,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         ::-webkit-scrollbar-track { background: #080c14; }
         ::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 99px; }
         ::-webkit-scrollbar-thumb:hover { background: #334155; }
-        .glass-panel { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(16px); border: 1px solid rgba(255, 255, 255, 0.08); }
+        .glass-panel { background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.08); }
         .glow-blue { box-shadow: 0 0 25px -5px rgba(59, 130, 246, 0.3); }
         .glow-purple { box-shadow: 0 0 25px -5px rgba(168, 85, 247, 0.3); }
         .glow-red { box-shadow: 0 0 25px -5px rgba(239, 68, 68, 0.4); }
@@ -1297,7 +1294,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                             <h1 class="text-xl font-extrabold truncate tracking-tight text-white">Fanpage Control Center</h1>
                             <span class="text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/40 px-3 py-0.5 rounded-full font-mono font-bold">V14.5 Pro Smart Matrix & Disk Matcher</span>
                         </div>
-                        <p class="text-xs text-slate-400 truncate mt-0.5">Quản trị Fanpage · Biến động Follower Tuần/Tháng/Năm · Import Bài Viết Photo & Video từ Ổ Đĩa Máy Tính · Multi-Post Bulk Publisher</p>
+                        <p class="text-xs text-slate-400 truncate mt-0.5">Quản trị Fanpage · Nhập kho Photo & Video · Đăng bài hàng loạt</p>
                     </div>
                     <div class="hidden 2xl:flex items-center gap-2 ml-4 bg-slate-950/80 px-3.5 py-1.5 rounded-xl border border-slate-800">
                         <span class="h-2.5 w-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -1336,18 +1333,9 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     <button onclick="openFetchPostsModal()" class="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 hover:from-emerald-500 hover:to-cyan-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-2 shadow-lg shadow-emerald-950/50 glow-emerald">
                         <i class="fa-solid fa-cloud-arrow-down text-emerald-200"></i> Tải Bài Viết
                     </button>
-                    <button onclick="openTokenInspectorModal()" class="bg-slate-800/80 hover:bg-slate-700 text-amber-400 text-xs font-semibold px-3 py-2 rounded-xl transition border border-slate-700 flex items-center gap-2 shadow">
-                        <i class="fa-solid fa-shield-halved text-amber-400"></i> Kiểm tra Token
-                    </button>
-                    <button onclick="openFollowerAnalyticsModal()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-2 shadow-lg shadow-blue-950/50">
-                        <i class="fa-solid fa-chart-line text-blue-200"></i> Thống kê Analytics
-                    </button>
                     <button onclick="openPostLibraryModal()" class="bg-gradient-to-r from-teal-600 to-cyan-600 hover:from-teal-500 hover:to-cyan-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-2 shadow-lg shadow-teal-950/50 glow-teal">
                         <i class="fa-solid fa-folder-open text-teal-200"></i> Kho Photo & Video
                         <span id="library-badge-count" class="bg-teal-950 text-teal-300 text-[10px] px-2 py-0.5 rounded-full border border-teal-500/30 font-mono">0</span>
-                    </button>
-                    <button onclick="openAiGeneratorModal()" class="bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-2 shadow-lg shadow-purple-950/50 glow-purple">
-                        <i class="fa-solid fa-wand-magic-sparkles text-pink-200"></i> Gemini AI
                     </button>
                     <button onclick="openPublisherModal()" class="bg-gradient-to-r from-orange-600 via-amber-600 to-red-600 hover:from-orange-500 hover:to-red-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-2 shadow-lg shadow-orange-950/50 glow-orange">
                         <i class="fa-solid fa-paper-plane"></i> Đăng Bài & Matrix Multi-Post
@@ -1365,9 +1353,6 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             </div>
         </div>
 
-        <!-- Dashboard Analytics Quick Cards -->
-        <div id="dashboard-summary" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-3 mb-5"></div>
-
         <!-- Filter & Search Bar -->
         <div class="glass-panel rounded-2xl p-4 mb-5 flex flex-col xl:flex-row gap-4 justify-between items-center shadow-lg">
             <div class="relative w-full xl:w-96">
@@ -1376,25 +1361,8 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     class="w-full bg-slate-950/90 border border-slate-800 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition">
             </div>
             <div class="flex flex-wrap gap-2.5 w-full xl:w-auto justify-end items-center">
-                <!-- Multi-Period Follower Growth Selector -->
-                <div class="flex items-center gap-1.5 bg-slate-950 border border-slate-800 rounded-xl px-2.5 py-1">
-                    <span class="text-[10px] text-slate-400 font-bold uppercase"><i class="fa-solid fa-chart-line text-blue-400 mr-1"></i>Xem Biến Động:</span>
-                    <select id="follower-period-select" onchange="renderPages()" class="bg-slate-900 border border-slate-800 text-blue-300 font-bold font-mono text-xs rounded-lg px-2 py-1 focus:outline-none cursor-pointer">
-                        <option value="day" selected>24 Giờ</option>
-                        <option value="week">1 Tuần (7 ngày)</option>
-                        <option value="month">1 Tháng (30 ngày)</option>
-                        <option value="year">1 Năm (365 ngày)</option>
-                    </select>
-                </div>
-
                 <select id="page-batch-filter" onchange="renderPages()" class="bg-slate-950 border border-indigo-500/30 rounded-xl px-3 py-2.5 text-xs text-indigo-200 focus:outline-none">
                     <option value="all">Lô import: Tất cả</option>
-                </select>
-                <select id="follower-growth-filter" onchange="renderPages()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2.5 text-xs text-slate-300 focus:outline-none">
-                    <option value="all">Xu Hướng: Tất cả</option>
-                    <option value="growing">📈 Đang tăng trưởng (> 0)</option>
-                    <option value="declining">📉 Đang sụt giảm (< 0)</option>
-                    <option value="stable">⚖️ Ổn định (= 0)</option>
                 </select>
 
                 <select id="page-status-filter" onchange="renderPages()" class="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 focus:outline-none">
@@ -1406,7 +1374,6 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 <select id="page-sort" onchange="renderPages()" class="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-xs text-slate-300 focus:outline-none">
                     <option value="name">Sắp xếp: Tên Page A-Z</option>
                     <option value="followers-desc">Follower giảm dần ↓</option>
-                    <option value="growth-desc">Tăng trưởng Follower cao nhất 🔥</option>
                     <option value="likes-today-desc">Likes Bài Viết Hôm Nay</option>
                     <option value="likes-month-desc">Likes Bài Viết Tháng Này</option>
                 </select>
@@ -1421,7 +1388,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             <div class="px-5 py-4 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3 bg-slate-950/60">
                 <div class="flex items-center gap-3">
                     <i class="fa-solid fa-table-list text-blue-400 text-sm"></i>
-                    <span class="text-xs md:text-sm font-bold text-slate-200">Danh sách Fanpage & Thống Kê Follower Multi-Period</span>
+                    <span class="text-xs md:text-sm font-bold text-slate-200">Danh sách Fanpage</span>
                     <span id="page-count-badge" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">0 Page</span>
                 </div>
 
@@ -1444,7 +1411,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     </button>
                 </div>
 
-                <div class="text-xs text-slate-400 hidden lg:block">Theo dõi Follower (Tuần, Tháng, Năm) & Reaction bài viết tự động</div>
+                <div class="text-xs text-slate-400 hidden lg:block">Follower, lượt thích và trạng thái đồng bộ</div>
             </div>
             <div class="overflow-x-auto" style="max-height: calc(100vh - 340px);">
                 <table class="w-full text-xs text-left">
@@ -1455,7 +1422,6 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                             </th>
                             <th class="px-5 py-3.5 min-w-[220px]">Fanpage Info</th>
                             <th class="px-4 py-3.5 text-right min-w-[130px]">Followers</th>
-                            <th class="px-4 py-3.5 text-right min-w-[160px] text-blue-400" title="Biến động Follower theo chu kỳ chọn">📊 Biến Động Follower</th>
                             <th class="px-4 py-3.5 text-right min-w-[110px] text-rose-400" title="Tổng lượt thích bài viết hôm nay">❤️ Likes Hôm Nay</th>
                             <th class="px-4 py-3.5 text-right min-w-[110px] text-amber-400" title="Tổng lượt thích bài viết tuần này">❤️ Likes Tuần Này</th>
                             <th class="px-4 py-3.5 text-right min-w-[110px] text-purple-400" title="Tổng lượt thích bài viết tháng này">❤️ Likes Tháng Này</th>
@@ -2366,85 +2332,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         </div>
     </div>
 
-    <!-- GEMINI AI CONTENT GENERATOR PRO MODAL -->
-    <div id="ai-generator-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center hidden z-50 p-4">
-        <div class="bg-slate-900 p-6 rounded-2xl shadow-2xl w-full max-w-3xl border border-slate-800 max-h-[92vh] overflow-y-auto animate-fade-in">
-            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-800">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-9 h-9 rounded-xl bg-purple-600/20 border border-purple-500/40 flex items-center justify-center text-purple-400 glow-purple">
-                        <i class="fa-solid fa-wand-magic-sparkles"></i>
-                    </div>
-                    <div>
-                        <h3 class="text-sm font-bold text-white">Gemini AI Content Engine Pro</h3>
-                        <p class="text-xs text-slate-400">Sử dụng Google Gemini AI để sáng tạo nội dung truyền thông kèm Spintax đảo ngữ.</p>
-                    </div>
-                </div>
-                <button onclick="closeAiGeneratorModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
-            </div>
-
-            <div class="space-y-4 text-xs">
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div>
-                        <label class="block text-slate-300 font-medium mb-1">Chủ đề / Sản phẩm dịch vụ:</label>
-                        <input type="text" id="ai-prompt-topic" value="Bộ sưu tập Thời Trang Công Sở Mùa Hè 2026" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-100 focus:outline-none focus:border-purple-500">
-                    </div>
-                    <div>
-                        <label class="block text-slate-300 font-medium mb-1">Tông giọng bài viết (Tone):</label>
-                        <select id="ai-prompt-tone" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none">
-                            <option value="Khuyến mãi chốt đơn sôi nổi, thu hút">🔥 Chốt đơn & Bán hàng cực cháy</option>
-                            <option value="Chuyên nghiệp, sang trọng, tinh tế">✨ Sang trọng & Chuyên nghiệp</option>
-                            <option value="Thân thiện, gần gũi, truyền cảm hứng">💡 Chia sẻ giá trị & Thân thiện</option>
-                            <option value="Hài hước, bắt trend viral">🚀 Viral & Bắt trend Facebook</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                        <label class="block text-slate-300 font-medium mb-1">Số lượng bài viết cần tạo:</label>
-                        <select id="ai-prompt-count" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-slate-200 focus:outline-none">
-                            <option value="1">1 Bài viết</option>
-                            <option value="3" selected>3 Bài viết</option>
-                            <option value="5">5 Bài viết</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label class="block text-slate-300 font-medium mb-1">Lưu vào Thư Mục Kho:</label>
-                        <select id="ai-target-folder" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 text-teal-300 font-bold focus:outline-none"></select>
-                    </div>
-                    <div class="flex flex-col justify-center gap-1.5 pt-1">
-                        <label class="flex items-center gap-2 cursor-pointer text-slate-300 text-[11px]">
-                            <input type="checkbox" id="ai-opt-followers" class="accent-purple-500 w-3.5 h-3.5 rounded" checked>
-                            <span>Gắn tag `@followers`</span>
-                        </label>
-                        <label class="flex items-center gap-2 cursor-pointer text-slate-300 text-[11px]">
-                            <input type="checkbox" id="ai-opt-spintax" class="accent-purple-500 w-3.5 h-3.5 rounded" checked>
-                            <span>Tạo Spintax `{A|B|C}` đảo ngữ</span>
-                        </label>
-                    </div>
-                </div>
-
-                <button onclick="generateAiContentWithGemini()" id="btn-generate-ai" class="w-full bg-gradient-to-r from-purple-600 via-pink-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-white font-bold py-3 rounded-xl transition shadow-lg shadow-purple-950/50 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-bolt text-amber-300"></i> Tạo Bài Viết Bằng Gemini AI Engine
-                </button>
-
-                <div id="ai-loading-spinner" class="hidden text-center py-6">
-                    <i class="fa-solid fa-circle-notch fa-spin text-purple-400 text-2xl mb-2"></i>
-                    <p class="text-xs text-slate-400">Gemini AI đang phân tích và soạn thảo bài viết chuyên nghiệp...</p>
-                </div>
-
-                <div id="ai-generated-results-box" class="space-y-3 pt-2"></div>
-
-                <div class="flex gap-2.5 pt-2 border-t border-slate-800">
-                    <button onclick="closeAiGeneratorModal()" class="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl transition">Đóng</button>
-                    <button onclick="sendAllAiPostsToLibrary()" class="w-1/2 bg-teal-600 hover:bg-teal-500 text-white font-semibold py-2.5 rounded-xl transition shadow-lg shadow-teal-950/40">
-                        <i class="fa-solid fa-folder-plus mr-1"></i> Lưu Tất Cả Vào Thư Mục Đã Chọn
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- KHO LƯU TRỮ PHOTO & VIDEO MANAGER MODAL (V14.5 UPGRADED) -->
     <div id="post-library-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center hidden z-50 p-3 md:p-5">
         <div class="bg-slate-900 p-5 md:p-6 rounded-2xl shadow-2xl w-full max-w-7xl border border-slate-800 max-h-[94vh] overflow-y-auto animate-fade-in">
@@ -2709,93 +2596,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         </div>
     </div>
 
-    <!-- FOLLOWER & POST LIKES ANALYTICS MODAL (TUẦN, THÁNG, NĂM) -->
-    <div id="follower-analytics-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center hidden z-50 p-3 md:p-5">
-        <div class="bg-slate-900 p-5 md:p-6 rounded-2xl shadow-2xl w-full max-w-6xl border border-slate-800 max-h-[92vh] overflow-y-auto animate-fade-in">
-            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-800">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/40 flex items-center justify-center text-blue-400">
-                        <i class="fa-solid fa-chart-line"></i>
-                    </div>
-                    <div>
-                        <h3 class="text-sm font-bold text-white">Biểu Đồ Analytics Follower Tuần, Tháng, Năm & Post Likes</h3>
-                        <p class="text-xs text-slate-400">Theo dõi chu kỳ biến động Follower chi tiết 24h, 7 Ngày, 30 Ngày & 365 Ngày bằng Chart.js.</p>
-                    </div>
-                </div>
-                <div class="flex items-center gap-2">
-                    <select id="analytics-page-select" onchange="renderFollowerAnalytics()" class="bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2 text-xs text-slate-200 focus:outline-none"></select>
-                    <button onclick="closeFollowerAnalyticsModal()" class="text-slate-400 hover:text-white p-2"><i class="fa-solid fa-xmark text-lg"></i></button>
-                </div>
-            </div>
-
-            <div class="space-y-4 text-xs">
-                <div id="analytics-summary-cards" class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-3"></div>
-                
-                <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-lg">
-                    <div class="flex justify-between items-center mb-3">
-                        <span class="font-bold text-slate-200 text-xs flex items-center gap-2">
-                            <i class="fa-solid fa-chart-area text-blue-400"></i> Biểu Đồ Lịch Sử Tăng Trưởng Follower & Lượt Thích Bài Viết
-                        </span>
-                        <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800">
-                            <button onclick="switchChartMetric('both')" id="chart-btn-both" class="px-2 py-0.5 text-[10px] font-bold rounded bg-blue-600 text-white">Tất Cả</button>
-                            <button onclick="switchChartMetric('followers')" id="chart-btn-followers" class="px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white">Followers</button>
-                            <button onclick="switchChartMetric('likes')" id="chart-btn-likes" class="px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white">Likes</button>
-                        </div>
-                    </div>
-                    <div class="h-64 w-full">
-                        <canvas id="followerChart"></canvas>
-                    </div>
-                </div>
-
-                <div class="bg-slate-950 border border-slate-800 rounded-2xl p-4 space-y-3">
-                    <div class="font-bold text-slate-200 text-xs flex items-center justify-between">
-                        <span class="flex items-center gap-2">
-                            <i class="fa-solid fa-table text-blue-400"></i> Lịch Sử Bản Ghi Snapshot Follower & Post Likes (Chênh Lệch Thực Tế)
-                        </span>
-                        <button onclick="clearAnalyticsPageHistory()" class="text-[10px] text-red-400 hover:underline">Xóa Lịch Sử Page Này</button>
-                    </div>
-                    <div class="overflow-x-auto max-h-52 border border-slate-800 rounded-xl">
-                        <table class="w-full text-left text-xs">
-                            <thead class="bg-slate-900 text-slate-400 font-semibold sticky top-0 uppercase text-[10px]">
-                                <tr>
-                                    <th class="p-3">Thời Gian Ghi Nhận</th>
-                                    <th class="p-3 text-right">Tổng Follower</th>
-                                    <th class="p-3 text-right">Biến Động ($\Delta$)</th>
-                                    <th class="p-3 text-right text-rose-400">Likes Hôm Nay</th>
-                                    <th class="p-3 text-right text-amber-400">Likes Tuần Này</th>
-                                    <th class="p-3 text-right text-purple-400">Likes Tháng Này</th>
-                                </tr>
-                            </thead>
-                            <tbody id="analytics-history-table-body" class="divide-y divide-slate-800 text-slate-300"></tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TOKEN HEALTH INSPECTOR MODAL -->
-    <div id="token-inspector-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center hidden z-50 p-4">
-        <div class="bg-slate-900 p-6 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-800 max-h-[90vh] overflow-y-auto animate-fade-in">
-            <div class="flex justify-between items-center mb-4 pb-3 border-b border-slate-800">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400">
-                        <i class="fa-solid fa-shield-halved"></i>
-                    </div>
-                    <h3 class="text-sm font-bold text-white">Kiểm Tra Sức Khỏe & Quyền Hạn Page Access Token</h3>
-                </div>
-                <button onclick="closeTokenInspectorModal()" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
-            </div>
-            <div class="space-y-4 text-xs">
-                <p class="text-slate-400">Bấm nút bên dưới để thực hiện kiểm tra phản hồi trực tiếp từ Facebook Graph API cho tất cả các Token trong hệ thống.</p>
-                <button onclick="runTokenHealthCheck()" class="w-full bg-amber-600 hover:bg-amber-500 text-white font-bold py-2.5 rounded-xl transition flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-microscope"></i> Bắt Đầu Kiểm Tra Tất Cả Token
-                </button>
-                <div id="token-check-results-list" class="space-y-2 max-h-80 overflow-y-auto"></div>
-            </div>
-        </div>
-    </div>
-
     <!-- AUTO-REPLY COMMENT TEMPLATES MODAL -->
     <div id="comment-templates-modal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-md flex items-center justify-center hidden z-50 p-4">
         <div class="bg-slate-900 p-6 rounded-2xl shadow-2xl w-full max-w-2xl border border-slate-800 animate-fade-in">
@@ -2821,7 +2621,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
     <script>
         // --- GLOBAL STATE ---
         const renderTimers = new Map();
-        function scheduleRender(key, renderFn, delay = 120) {
+        function scheduleRender(key, renderFn, delay = 60) {
             const pending = renderTimers.get(key);
             if (pending) clearTimeout(pending);
             renderTimers.set(key, setTimeout(() => {
@@ -2844,11 +2644,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         let libraryFolders = [];
         let selectedActiveFolderId = 'all'; 
         let selectedLibraryMediaTypeFilter = 'all'; // PHOTO vs VIDEO Filter
-        let followerHistoryLogs = {}; 
-        let tempAiGeneratedPosts = [];
         let commentTemplates = [];
-        let followerChartInstance = null;
-        let chartMetricView = 'both';
         let isCronRunning = true;
         let pendingImportTokenPages = [];
         let isBackupTokenMasked = true;
@@ -3446,8 +3242,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 </button>
             `;
 
+            const folderCounts = new Map();
+            postLibrary.forEach(post => {
+                const folderId = post.folderId || 'folder_default';
+                folderCounts.set(folderId, (folderCounts.get(folderId) || 0) + 1);
+            });
+
             libraryFolders.forEach(f => {
-                const count = postLibrary.filter(p => (p.folderId || 'folder_default') === f.id).length;
+                const count = folderCounts.get(f.id) || 0;
                 const isActive = selectedActiveFolderId === f.id;
                 html += `
                     <button onclick="selectLibraryFolderFilter('${f.id}')" class="folder-tab ${isActive ? 'folder-tab-active' : 'bg-slate-950 text-slate-300 hover:text-white'} border border-slate-800 px-3 py-1.5 rounded-xl text-xs font-semibold transition shrink-0 flex items-center gap-1.5">
@@ -3488,7 +3290,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const selects = [
                 'lib-post-folder-select',
                 'bulk-move-folder-select',
-                'ai-target-folder',
                 'fetch-target-folder',
                 'quick-picker-folder-filter',
                 'import-excel-target-folder',
@@ -4613,6 +4414,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
             autoSyncCountdown = autoSyncIntervalSeconds;
             updateSyncCycleUI();
+            startContinuousAutoSyncTimer();
         }
 
         function toggleAutoSyncEngine() {
@@ -4631,6 +4433,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 showToast('Đã TẠM DỪNG tự động cập nhật!', 'warning');
             }
             updateSyncCycleUI();
+            startContinuousAutoSyncTimer();
         }
 
         function updateSyncCycleUI() {
@@ -4638,23 +4441,28 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const timerIcon = document.getElementById('sync-timer-icon');
 
             if (!isAutoSyncEnabled || autoSyncIntervalSeconds === 0) {
-                if (label) label.innerText = 'TẮT';
-                if (timerIcon) timerIcon.className = 'fa-solid fa-clock-slash text-slate-500';
+                if (label && label.textContent !== 'TẮT') label.textContent = 'TẮT';
+                const iconClass = 'fa-solid fa-clock-slash text-slate-500';
+                if (timerIcon && timerIcon.className !== iconClass) timerIcon.className = iconClass;
             } else {
-                if (label) label.innerText = `${autoSyncCountdown}s`;
-                if (timerIcon) timerIcon.className = 'fa-solid fa-clock animate-pulse text-amber-400';
+                const labelText = `${autoSyncCountdown}s`;
+                if (label && label.textContent !== labelText) label.textContent = labelText;
+                const iconClass = 'fa-solid fa-clock animate-pulse text-amber-400';
+                if (timerIcon && timerIcon.className !== iconClass) timerIcon.className = iconClass;
             }
         }
 
         function startContinuousAutoSyncTimer() {
-            if (autoSyncTimerInstance) clearInterval(autoSyncTimerInstance);
+            if (autoSyncTimerInstance) {
+                clearInterval(autoSyncTimerInstance);
+                autoSyncTimerInstance = null;
+            }
+            if (!isAutoSyncEnabled || autoSyncIntervalSeconds === 0) {
+                updateSyncCycleUI();
+                return;
+            }
 
             autoSyncTimerInstance = setInterval(() => {
-                if (!isAutoSyncEnabled || autoSyncIntervalSeconds === 0) {
-                    updateSyncCycleUI();
-                    return;
-                }
-
                 autoSyncCountdown--;
                 if (autoSyncCountdown <= 0) {
                     autoSyncCountdown = autoSyncIntervalSeconds;
@@ -4671,63 +4479,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (icon) icon.classList.remove('fa-spin');
             autoSyncCountdown = autoSyncIntervalSeconds;
             updateSyncCycleUI();
-        }
-
-        function recordFollowerSnapshot(pageId, count, likesObj = null) {
-            if (!followerHistoryLogs[pageId]) followerHistoryLogs[pageId] = [];
-            const now = Date.now();
-            const last = followerHistoryLogs[pageId][followerHistoryLogs[pageId].length - 1];
-            
-            const todayLikes = likesObj ? likesObj.today : (last?.likesToday || 0);
-            const weekLikes = likesObj ? likesObj.week : (last?.likesWeek || 0);
-            const monthLikes = likesObj ? likesObj.month : (last?.likesMonth || 0);
-
-            if (!last || Math.abs(now - last.timestamp) >= 5000 || last.count !== count || last.likesToday !== todayLikes) {
-                followerHistoryLogs[pageId].push({ 
-                    timestamp: now, 
-                    count: Number(count) || 0,
-                    likesToday: Number(todayLikes) || 0,
-                    likesWeek: Number(weekLikes) || 0,
-                    likesMonth: Number(monthLikes) || 0
-                });
-                if (followerHistoryLogs[pageId].length > 500) followerHistoryLogs[pageId].shift();
-                saveFollowerHistoryToStorage();
-            }
-        }
-
-        function calculateFollowerChanges(pageId) {
-            const logs = followerHistoryLogs[pageId] || [];
-            if (!logs.length) return { hourChange: 0, dayChange: 0, weekChange: 0, monthChange: 0, yearChange: 0 };
-            const current = logs[logs.length - 1].count;
-            const now = Date.now();
-            
-            const oneHourAgo = now - 3600000;
-            const oneDayAgo = now - 86400000;
-            const oneWeekAgo = now - (7 * 86400000);
-            const oneMonthAgo = now - (30 * 86400000);
-            const oneYearAgo = now - (365 * 86400000);
-
-            const hourLog = logs.find(l => l.timestamp >= oneHourAgo) || logs[0];
-            const dayLog = logs.find(l => l.timestamp >= oneDayAgo) || logs[0];
-            const weekLog = logs.find(l => l.timestamp >= oneWeekAgo) || logs[0];
-            const monthLog = logs.find(l => l.timestamp >= oneMonthAgo) || logs[0];
-            const yearLog = logs.find(l => l.timestamp >= oneYearAgo) || logs[0];
-
-            return {
-                hourChange: current - hourLog.count,
-                dayChange: current - dayLog.count,
-                weekChange: current - weekLog.count,
-                monthChange: current - monthLog.count,
-                yearChange: current - yearLog.count
-            };
-        }
-
-        function getPagePostLikesMetrics(pageObj) {
-            return {
-                today: pageObj.postLikesToday || 0,
-                week: pageObj.postLikesWeek || 0,
-                month: pageObj.postLikesMonth || 0
-            };
         }
 
         function openPublisherModal() {
@@ -5371,7 +5122,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             loadScheduledQueueFromStorage();
             loadFoldersFromStorage();
             loadPostLibraryFromStorage();
-            loadFollowerHistoryFromStorage();
             loadCommentTemplatesFromStorage();
             renderPages();
             startContinuousAutoSyncTimer();
@@ -5520,14 +5270,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         function updateLibraryBadgeCount() {
             const badge = document.getElementById('library-badge-count');
             if (badge) badge.innerText = postLibrary.length;
-        }
-
-        function loadFollowerHistoryFromStorage() {
-            const saved = localStorage.getItem('fb_follower_history_v12');
-            if (saved) { try { followerHistoryLogs = JSON.parse(saved); } catch(e) { followerHistoryLogs = {}; } }
-        }
-        function saveFollowerHistoryToStorage() {
-            localStorage.setItem('fb_follower_history_v12', JSON.stringify(followerHistoryLogs));
         }
 
         function loadCommentTemplatesFromStorage() {
@@ -7315,10 +7057,15 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (!select) return;
             const currentValue = select.value || 'all';
             const batches = getPublisherPageBatches();
-            select.innerHTML = '<option value="all">Lô import: Tất cả</option>' + batches.map(batch => `
-                <option value="${escapeHtml(batch.key)}">${escapeHtml(batch.name)} (${batch.pageIds.length} Page)</option>
-            `).join('');
-            select.value = batches.some(batch => batch.key === currentValue) ? currentValue : 'all';
+            const signature = JSON.stringify(batches.map(batch => [batch.key, batch.name, batch.pageIds.length]));
+            if (select.dataset.batchSignature !== signature) {
+                select.innerHTML = '<option value="all">Lô import: Tất cả</option>' + batches.map(batch => `
+                    <option value="${escapeHtml(batch.key)}">${escapeHtml(batch.name)} (${batch.pageIds.length} Page)</option>
+                `).join('');
+                select.dataset.batchSignature = signature;
+            }
+            const nextValue = batches.some(batch => batch.key === currentValue) ? currentValue : 'all';
+            if (select.value !== nextValue) select.value = nextValue;
         }
         function renderPages() {
             const tbody = document.getElementById('pages-table-body');
@@ -7328,21 +7075,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const batchFilter = document.getElementById('page-batch-filter')?.value || 'all';
             
             const searchVal = (document.getElementById('page-search')?.value || '').toLowerCase();
-            const periodVal = document.getElementById('follower-period-select')?.value || 'day';
-            const growthFilter = document.getElementById('follower-growth-filter')?.value || 'all';
             const statusFilter = document.getElementById('page-status-filter')?.value || 'all';
             const sortBy = document.getElementById('page-sort')?.value || 'name';
-            const changesByPageId = new Map();
-            const getChanges = pageId => {
-                if (!changesByPageId.has(pageId)) changesByPageId.set(pageId, calculateFollowerChanges(pageId));
-                return changesByPageId.get(pageId);
-            };
-            const selectedChangeFor = changes => {
-                if (periodVal === 'week') return changes.weekChange;
-                if (periodVal === 'month') return changes.monthChange;
-                if (periodVal === 'year') return changes.yearChange;
-                return changes.dayChange;
-            };
 
             let filtered = pagesList.filter(p => {
                 if (batchFilter !== 'all' && getPageImportBatchKey(p) !== batchFilter) return false;
@@ -7351,21 +7085,12 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
                 if (statusFilter === 'online' && p.error) return false;
                 if (statusFilter === 'error' && !p.error) return false;
-
-                if (growthFilter !== 'all') {
-                    const currentChange = selectedChangeFor(getChanges(p.id));
-                    if (growthFilter === 'growing' && currentChange <= 0) return false;
-                    if (growthFilter === 'declining' && currentChange >= 0) return false;
-                    if (growthFilter === 'stable' && currentChange !== 0) return false;
-                }
-
                 return true;
             });
 
             filtered.sort((a, b) => {
                 if (sortBy === 'name') return a.name.localeCompare(b.name);
                 if (sortBy === 'followers-desc') return (b.currentFollowers || 0) - (a.currentFollowers || 0);
-                if (sortBy === 'growth-desc') return selectedChangeFor(getChanges(b.id)) - selectedChangeFor(getChanges(a.id));
                 if (sortBy === 'likes-today-desc') return (b.postLikesToday || 0) - (a.postLikesToday || 0);
                 if (sortBy === 'likes-month-desc') return (b.postLikesMonth || 0) - (a.postLikesMonth || 0);
                 return 0;
@@ -7376,27 +7101,12 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (!filtered.length) {
                 tbody.innerHTML = '';
                 if (emptyState) emptyState.classList.remove('hidden');
-                renderDashboardSummaryCards([]);
                 return;
             }
 
             if (emptyState) emptyState.classList.add('hidden');
 
             tbody.innerHTML = filtered.map((p) => {
-                const changes = getChanges(p.id);
-                let selectedChange = changes.dayChange;
-                let periodTag = '24h';
-                if (periodVal === 'week') { selectedChange = changes.weekChange; periodTag = '7 Ngày'; }
-                if (periodVal === 'month') { selectedChange = changes.monthChange; periodTag = '30 Ngày'; }
-                if (periodVal === 'year') { selectedChange = changes.yearChange; periodTag = '365 Ngày'; }
-
-                let changeBadge = `<span class="text-slate-400 font-mono font-bold">0 (${periodTag})</span>`;
-                if (selectedChange > 0) {
-                    changeBadge = `<span class="text-emerald-400 font-mono font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">📈 +${selectedChange.toLocaleString('vi-VN')} (${periodTag})</span>`;
-                } else if (selectedChange < 0) {
-                    changeBadge = `<span class="text-red-400 font-mono font-bold bg-red-500/10 px-2 py-0.5 rounded border border-red-500/20">📉 ${selectedChange.toLocaleString('vi-VN')} (${periodTag})</span>`;
-                }
-
                 // V14.6: "Lỗi Token" (đỏ) giờ CHỈ hiện khi Token thật sự hỏng/hết hạn/mất quyền.
                 // Lỗi tạm thời (rate-limit/mạng) hiện badge vàng riêng để không gây hoang mang
                 // rằng Token có vấn đề, trong khi thực tế sẽ tự đồng bộ lại ở chu kỳ kế tiếp.
@@ -7426,9 +7136,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         <td class="px-4 py-3.5 text-right font-mono font-extrabold text-white text-sm">
                             ${(p.currentFollowers || 0).toLocaleString('vi-VN')}
                         </td>
-                        <td class="px-4 py-3.5 text-right">
-                            ${changeBadge}
-                        </td>
                         <td class="px-4 py-3.5 text-right font-mono font-bold text-rose-400">
                             ❤️ ${(p.postLikesToday || 0).toLocaleString('vi-VN')}
                         </td>
@@ -7447,7 +7154,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         <td class="px-5 py-3.5 text-right">
                             <div class="flex items-center justify-end gap-1.5">
                                 <button onclick="openFetchPostsModal('${p.id}')" class="p-1.5 bg-slate-800 hover:bg-emerald-600/80 text-emerald-300 rounded-lg transition" title="Tải bài viết Page này"><i class="fa-solid fa-cloud-arrow-down text-xs"></i></button>
-                                <button onclick="openFollowerAnalyticsModal('${p.id}')" class="p-1.5 bg-slate-800 hover:bg-blue-600/80 text-blue-300 rounded-lg transition" title="Xem biểu đồ Analytics"><i class="fa-solid fa-chart-line text-xs"></i></button>
                                 <button onclick="deletePage('${p.id}')" class="p-1.5 bg-slate-800 hover:bg-red-600/80 text-red-300 rounded-lg transition" title="Xóa Fanpage"><i class="fa-solid fa-trash-can text-xs"></i></button>
                             </div>
                         </td>
@@ -7455,64 +7161,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 `;
             }).join('');
 
-            renderDashboardSummaryCards(filtered, changesByPageId);
             updatePageSelectionState();
-        }
-
-        function renderDashboardSummaryCards(list, cachedChanges = null) {
-            const container = document.getElementById('dashboard-summary');
-            if (!container) return;
-
-            const totalPages = list.length;
-            const totalFollowers = list.reduce((acc, p) => acc + (p.currentFollowers || 0), 0);
-            
-            let totalGrowing = 0;
-            let totalDeclining = 0;
-            list.forEach(p => {
-                const ch = (cachedChanges?.get(p.id) || calculateFollowerChanges(p.id)).dayChange;
-                if (ch > 0) totalGrowing++;
-                if (ch < 0) totalDeclining++;
-            });
-
-            const totalLikesToday = list.reduce((acc, p) => acc + (p.postLikesToday || 0), 0);
-            const totalLikesWeek = list.reduce((acc, p) => acc + (p.postLikesWeek || 0), 0);
-            const totalLikesMonth = list.reduce((acc, p) => acc + (p.postLikesMonth || 0), 0);
-            const errorTokens = list.filter(p => p.error).length;
-
-            container.innerHTML = `
-                <div class="glass-panel p-3 rounded-2xl border border-slate-800">
-                    <div class="text-[10px] text-slate-400 font-bold uppercase">Tổng Fanpage</div>
-                    <div class="text-xl font-extrabold text-white mt-0.5 font-mono">${totalPages}</div>
-                </div>
-                <div class="glass-panel p-3 rounded-2xl border border-blue-500/30">
-                    <div class="text-[10px] text-blue-400 font-bold uppercase">Tổng Followers</div>
-                    <div class="text-xl font-extrabold text-blue-300 mt-0.5 font-mono">${totalFollowers.toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="glass-panel p-3 rounded-2xl border border-emerald-500/30">
-                    <div class="text-[10px] text-emerald-400 font-bold uppercase">📈 Page Tăng Trưởng</div>
-                    <div class="text-xl font-extrabold text-emerald-400 mt-0.5 font-mono">${totalGrowing}</div>
-                </div>
-                <div class="glass-panel p-3 rounded-2xl border border-red-500/30">
-                    <div class="text-[10px] text-red-400 font-bold uppercase">📉 Page Sụt Giảm</div>
-                    <div class="text-xl font-extrabold text-red-400 mt-0.5 font-mono">${totalDeclining}</div>
-                </div>
-                <div class="glass-panel p-3 rounded-2xl border border-rose-500/30">
-                    <div class="text-[10px] text-rose-400 font-bold uppercase">❤️ Likes Hôm Nay</div>
-                    <div class="text-xl font-extrabold text-rose-400 mt-0.5 font-mono">${totalLikesToday.toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="glass-panel p-3 rounded-2xl border border-amber-500/30">
-                    <div class="text-[10px] text-amber-400 font-bold uppercase">❤️ Likes Tuần Này</div>
-                    <div class="text-xl font-extrabold text-amber-300 mt-0.5 font-mono">${totalLikesWeek.toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="glass-panel p-3 rounded-2xl border border-purple-500/30">
-                    <div class="text-[10px] text-purple-400 font-bold uppercase">❤️ Likes Tháng Này</div>
-                    <div class="text-xl font-extrabold text-purple-300 mt-0.5 font-mono">${totalLikesMonth.toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="glass-panel p-3 rounded-2xl border border-amber-500/40">
-                    <div class="text-[10px] text-amber-400 font-bold uppercase">⚠️ Token Lỗi</div>
-                    <div class="text-xl font-extrabold text-amber-400 mt-0.5 font-mono">${errorTokens}</div>
-                </div>
-            `;
         }
 
         async function fetchAllPages(silent = false) {
@@ -7550,8 +7199,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     page.currentFollowers = data.followers_count || data.fan_count || page.currentFollowers || 0;
                     page.lastUpdated = new Date().toLocaleTimeString('vi-VN');
 
-                    const likesObj = getPagePostLikesMetrics(page);
-                    recordFollowerSnapshot(page.id, page.currentFollowers, likesObj);
                 } catch (err) {
                     const classified = err.fbClassified;
 
@@ -7824,121 +7471,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             renderPages();
             showToast(`Đã import thành công ${added} Fanpage!`, 'success');
             fetchAllPages(true);
-        }
-
-        function openAiGeneratorModal() {
-            populateFolderDropdownSelects();
-            document.getElementById('ai-generator-modal').classList.remove('hidden');
-        }
-
-        function closeAiGeneratorModal() {
-            document.getElementById('ai-generator-modal').classList.add('hidden');
-        }
-
-        async function generateAiContentWithGemini() {
-            const topic = document.getElementById('ai-prompt-topic').value.trim();
-            const tone = document.getElementById('ai-prompt-tone').value;
-            const count = parseInt(document.getElementById('ai-prompt-count').value) || 3;
-            const optFollowers = document.getElementById('ai-opt-followers').checked;
-            const optSpintax = document.getElementById('ai-opt-spintax').checked;
-
-            if (!topic) {
-                showToast('Vui lòng nhập chủ đề bài viết!', 'warning');
-                return;
-            }
-
-            const btn = document.getElementById('btn-generate-ai');
-            const spinner = document.getElementById('ai-loading-spinner');
-            const resultsBox = document.getElementById('ai-generated-results-box');
-
-            btn.disabled = true;
-            spinner.classList.remove('hidden');
-            resultsBox.innerHTML = '';
-
-            const systemPrompt = "Bạn là một Chuyên gia Copywriter Facebook Marketing đỉnh cao. Hãy sáng tạo bài viết truyền thông bằng tiếng Việt, giật gân, cuốn hút và hỗ trợ bán hàng xuất sắc.";
-            const userPrompt = `Hãy viết ${count} bài đăng Facebook về chủ đề: "${topic}".
-Tông giọng: ${tone}.
-${optFollowers ? 'Vui lòng chèn thêm thẻ @followers ở cuối câu để tăng lượt tương tác.' : ''}
-${optSpintax ? 'Sử dụng cú pháp Spintax {Từ 1|Từ 2|Từ 3} ở đầu các câu chào để tạo nội dung độc bản tránh Spam.' : ''}
-Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài viết: ["Bài 1...", "Bài 2..."]. Không cần bất kỳ Markdown nào ngoài JSON.`;
-
-            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=`;
-
-            try {
-                const response = await fetch(apiUrl, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        contents: [{ parts: [{ text: userPrompt }] }],
-                        systemInstruction: { parts: [{ text: systemPrompt }] }
-                    })
-                });
-
-                const data = await response.json();
-                const rawText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-                let postsArray = [];
-                try {
-                    const cleanJson = rawText.replace(/```json/g, '').replace(/```/g, '').trim();
-                    postsArray = JSON.parse(cleanJson);
-                } catch(e) {
-                    postsArray = [rawText];
-                }
-
-                tempAiGeneratedPosts = postsArray;
-
-                resultsBox.innerHTML = postsArray.map((pText, idx) => `
-                    <div class="p-3.5 bg-slate-950 border border-slate-800 rounded-xl space-y-2">
-                        <div class="flex items-center justify-between text-[11px] font-bold text-purple-400">
-                            <span>BÀI VIẾT BẢN DỰ THẢO #${idx + 1}</span>
-                            <button onclick="applySingleAiPostToPublisher(${idx})" class="text-amber-400 hover:underline"><i class="fa-solid fa-paper-plane mr-1"></i> Đưa sang Publisher</button>
-                        </div>
-                        <div class="text-xs text-slate-200 whitespace-pre-wrap font-sans leading-relaxed">${escapeHtml(pText)}</div>
-                    </div>
-                `).join('');
-
-                showToast(`Gemini AI đã tạo xong ${postsArray.length} bài viết!`, 'success');
-
-            } catch (err) {
-                console.error('Gemini AI Error:', err);
-                showToast('Lỗi khi gọi Gemini AI: ' + err.message, 'error');
-            } finally {
-                btn.disabled = false;
-                spinner.classList.add('hidden');
-            }
-        }
-
-        function applySingleAiPostToPublisher(index) {
-            if (tempAiGeneratedPosts[index]) {
-                document.getElementById('publisher-content').value = tempAiGeneratedPosts[index];
-                closeAiGeneratorModal();
-                openPublisherModal();
-                showToast('Đã nạp bài viết AI sang Trung Tâm Đăng Bài!', 'success');
-            }
-        }
-
-        function sendAllAiPostsToLibrary() {
-            if (!tempAiGeneratedPosts.length) {
-                showToast('Chưa có bài viết AI nào được tạo!', 'warning');
-                return;
-            }
-
-            const targetFolderId = document.getElementById('ai-target-folder').value || 'folder_default';
-
-            tempAiGeneratedPosts.forEach(pText => {
-                postLibrary.unshift({
-                    id: 'lib_ai_' + Date.now() + '_' + Math.random().toString(36).substring(2,6),
-                    folderId: targetFolderId,
-                    mediaType: 'photo',
-                    content: pText,
-                    mediaPath: '',
-                    createdAt: new Date().toLocaleString('vi-VN')
-                });
-            });
-
-            savePostLibraryToStorage();
-            closeAiGeneratorModal();
-            showToast(`Đã lưu ${tempAiGeneratedPosts.length} bài viết AI vào Kho Thư Mục!`, 'success');
         }
 
         function openPostLibraryModal() {
@@ -8465,223 +7997,6 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
 
             closePostLibraryModal();
             openReviewModal(stagedList);
-        }
-
-        function openFollowerAnalyticsModal(pageLocalId = null) {
-            const select = document.getElementById('analytics-page-select');
-            select.innerHTML = pagesList.map(p => `<option value="${p.id}" ${p.id === pageLocalId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.pageId})</option>`).join('');
-            
-            document.getElementById('follower-analytics-modal').classList.remove('hidden');
-            renderFollowerAnalytics();
-        }
-
-        function closeFollowerAnalyticsModal() {
-            document.getElementById('follower-analytics-modal').classList.add('hidden');
-        }
-
-        function switchChartMetric(metric) {
-            chartMetricView = metric;
-            document.getElementById('chart-btn-both').className = metric === 'both' ? 'px-2 py-0.5 text-[10px] font-bold rounded bg-blue-600 text-white' : 'px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white';
-            document.getElementById('chart-btn-followers').className = metric === 'followers' ? 'px-2 py-0.5 text-[10px] font-bold rounded bg-blue-600 text-white' : 'px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white';
-            document.getElementById('chart-btn-likes').className = metric === 'likes' ? 'px-2 py-0.5 text-[10px] font-bold rounded bg-blue-600 text-white' : 'px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white';
-            renderFollowerAnalytics();
-        }
-
-        function renderFollowerAnalytics() {
-            const pageLocalId = document.getElementById('analytics-page-select').value;
-            const pageObj = pagesList.find(p => p.id === pageLocalId);
-            if (!pageObj) return;
-
-            const changes = calculateFollowerChanges(pageLocalId);
-            const summaryBox = document.getElementById('analytics-summary-cards');
-
-            summaryBox.innerHTML = `
-                <div class="bg-slate-950 p-3 rounded-xl border border-slate-800">
-                    <div class="text-[10px] text-slate-400 font-bold uppercase">Follower Hiện Tại</div>
-                    <div class="text-lg font-extrabold text-white mt-0.5 font-mono">${(pageObj.currentFollowers || 0).toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="bg-slate-950 p-3 rounded-xl border border-blue-500/30">
-                    <div class="text-[10px] text-blue-400 font-bold uppercase">Biến Động 24 Giờ</div>
-                    <div class="text-lg font-extrabold ${changes.dayChange >= 0 ? 'text-emerald-400' : 'text-red-400'} mt-0.5 font-mono">${changes.dayChange >= 0 ? '+' : ''}${changes.dayChange.toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="bg-slate-950 p-3 rounded-xl border border-amber-500/30">
-                    <div class="text-[10px] text-amber-400 font-bold uppercase">Biến Động 7 Ngày</div>
-                    <div class="text-lg font-extrabold ${changes.weekChange >= 0 ? 'text-emerald-400' : 'text-red-400'} mt-0.5 font-mono">${changes.weekChange >= 0 ? '+' : ''}${changes.weekChange.toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="bg-slate-950 p-3 rounded-xl border border-purple-500/30">
-                    <div class="text-[10px] text-purple-400 font-bold uppercase">Biến Động 30 Ngày</div>
-                    <div class="text-lg font-extrabold ${changes.monthChange >= 0 ? 'text-emerald-400' : 'text-red-400'} mt-0.5 font-mono">${changes.monthChange >= 0 ? '+' : ''}${changes.monthChange.toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="bg-slate-950 p-3 rounded-xl border border-rose-500/30">
-                    <div class="text-[10px] text-rose-400 font-bold uppercase">❤️ Likes Hôm Nay</div>
-                    <div class="text-lg font-extrabold text-rose-400 mt-0.5 font-mono">${(pageObj.postLikesToday || 0).toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="bg-slate-950 p-3 rounded-xl border border-amber-500/30">
-                    <div class="text-[10px] text-amber-300 font-bold uppercase">❤️ Likes Tuần Này</div>
-                    <div class="text-lg font-extrabold text-amber-300 mt-0.5 font-mono">${(pageObj.postLikesWeek || 0).toLocaleString('vi-VN')}</div>
-                </div>
-                <div class="bg-slate-950 p-3 rounded-xl border border-teal-500/30">
-                    <div class="text-[10px] text-teal-400 font-bold uppercase">❤️ Likes Tháng Này</div>
-                    <div class="text-lg font-extrabold text-teal-300 mt-0.5 font-mono">${(pageObj.postLikesMonth || 0).toLocaleString('vi-VN')}</div>
-                </div>
-            `;
-
-            const logs = followerHistoryLogs[pageLocalId] || [];
-            const historyBody = document.getElementById('analytics-history-table-body');
-
-            if (!logs.length) {
-                historyBody.innerHTML = '<tr><td colspan="6" class="p-4 text-center text-slate-500">Chưa có lịch sử bản ghi snapshot cho Page này.</td></tr>';
-            } else {
-                historyBody.innerHTML = [...logs].reverse().slice(0, 50).map((log, idx, arr) => {
-                    const prev = arr[idx + 1];
-                    const diff = prev ? (log.count - prev.count) : 0;
-                    const diffBadge = diff > 0 ? `<span class="text-emerald-400 font-bold">+${diff}</span>` :
-                                      diff < 0 ? `<span class="text-red-400 font-bold">${diff}</span>` :
-                                      '<span class="text-slate-500">0</span>';
-
-                    return `
-                        <tr class="hover:bg-slate-900 transition font-mono">
-                            <td class="p-3 text-slate-300">${new Date(log.timestamp).toLocaleString('vi-VN')}</td>
-                            <td class="p-3 text-right font-bold text-white">${log.count.toLocaleString('vi-VN')}</td>
-                            <td class="p-3 text-right">${diffBadge}</td>
-                            <td class="p-3 text-right text-rose-400">${(log.likesToday || 0).toLocaleString('vi-VN')}</td>
-                            <td class="p-3 text-right text-amber-400">${(log.likesWeek || 0).toLocaleString('vi-VN')}</td>
-                            <td class="p-3 text-right text-purple-400">${(log.likesMonth || 0).toLocaleString('vi-VN')}</td>
-                        </tr>
-                    `;
-                }).join('');
-            }
-
-            const ctx = document.getElementById('followerChart').getContext('2d');
-            if (followerChartInstance) followerChartInstance.destroy();
-
-            const labels = logs.map(l => new Date(l.timestamp).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
-            const followersData = logs.map(l => l.count);
-            const likesData = logs.map(l => l.likesToday || 0);
-
-            const datasets = [];
-
-            if (chartMetricView === 'both' || chartMetricView === 'followers') {
-                datasets.push({
-                    label: 'Followers',
-                    data: followersData,
-                    borderColor: '#3b82f6',
-                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                    fill: true,
-                    tension: 0.3
-                });
-            }
-
-            if (chartMetricView === 'both' || chartMetricView === 'likes') {
-                datasets.push({
-                    label: 'Likes Hôm Nay',
-                    data: likesData,
-                    borderColor: '#f43f5e',
-                    backgroundColor: 'rgba(244, 63, 94, 0.1)',
-                    fill: true,
-                    tension: 0.3
-                });
-            }
-
-            followerChartInstance = new Chart(ctx, {
-                type: 'line',
-                data: { labels, datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: { legend: { labels: { color: '#94a3b8' } } },
-                    scales: {
-                        x: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } },
-                        y: { ticks: { color: '#64748b' }, grid: { color: 'rgba(255,255,255,0.05)' } }
-                    }
-                }
-            });
-        }
-
-        function clearAnalyticsPageHistory() {
-            const pageLocalId = document.getElementById('analytics-page-select').value;
-            delete followerHistoryLogs[pageLocalId];
-            saveFollowerHistoryToStorage();
-            renderFollowerAnalytics();
-            showToast('Đã dọn dẹp lịch sử snapshot cho Fanpage này!', 'info');
-        }
-
-        function openTokenInspectorModal() {
-            document.getElementById('token-inspector-modal').classList.remove('hidden');
-        }
-
-        function closeTokenInspectorModal() {
-            document.getElementById('token-inspector-modal').classList.add('hidden');
-        }
-
-        async function runTokenHealthCheck() {
-            const container = document.getElementById('token-check-results-list');
-            container.innerHTML = '<div class="text-amber-400 font-semibold p-4 text-center"><i class="fa-solid fa-spinner fa-spin mr-1"></i> Đang gọi Facebook Graph API kiểm tra Token...</div>';
-
-            // V14.6: Trước đây BẤT KỲ phản hồi nào không có `is_valid: true` đều bị gán nhãn
-            // "❌ LỖI / HẾT HẠN", kể cả khi bản thân lệnh gọi debug_token bị Facebook giới hạn
-            // tần suất (rate-limit) chứ Token vẫn còn tốt. Giờ dùng chung bộ phân loại lỗi +
-            // tự thử lại, và tách riêng "Token thật sự hỏng" khỏi "chưa kiểm tra được, thử lại sau".
-            let html = '';
-            for (let p of pagesList) {
-                try {
-                    const data = await fetchGraphApiWithRetry(
-                        `https://graph.facebook.com/v24.0/debug_token?input_token=${encodeURIComponent(p.token)}&access_token=${encodeURIComponent(p.token)}`,
-                        {},
-                        { maxRetries: 2, baseDelayMs: 1500 }
-                    );
-
-                    if (data.data && data.data.is_valid) {
-                        html += `
-                            <div class="p-3 bg-slate-950 border border-emerald-500/40 rounded-xl space-y-1">
-                                <div class="flex items-center justify-between font-bold text-emerald-400">
-                                    <span>${escapeHtml(p.name)}</span>
-                                    <span>✓ HỢP LỆ (ACTIVE)</span>
-                                </div>
-                                <div class="text-[10px] text-slate-400 font-mono">App ID: ${data.data.app_id || 'N/A'} · Hết hạn: ${data.data.expires_at === 0 ? 'Vĩnh viễn (Never)' : new Date(data.data.expires_at * 1000).toLocaleString('vi-VN')}</div>
-                            </div>
-                        `;
-                    } else {
-                        html += `
-                            <div class="p-3 bg-slate-950 border border-red-500/40 rounded-xl space-y-1">
-                                <div class="flex items-center justify-between font-bold text-red-400">
-                                    <span>${escapeHtml(p.name)}</span>
-                                    <span>❌ TOKEN LỖI THẬT SỰ</span>
-                                </div>
-                                <div class="text-[10px] text-red-300/80 font-mono">${escapeHtml((data.data && data.data.error && data.data.error.message) || 'Token không hợp lệ, đã hết hạn hoặc bị gỡ quyền')}</div>
-                            </div>
-                        `;
-                    }
-                } catch (err) {
-                    const classified = err.fbClassified;
-                    if (classified && classified.isRealTokenError) {
-                        html += `
-                            <div class="p-3 bg-slate-950 border border-red-500/40 rounded-xl space-y-1">
-                                <div class="flex items-center justify-between font-bold text-red-400">
-                                    <span>${escapeHtml(p.name)}</span>
-                                    <span>❌ ${escapeHtml(classified.label.replace('🔑 ', '').replace('🚫 ', ''))}</span>
-                                </div>
-                                <div class="text-[10px] text-red-300/80 font-mono">${escapeHtml(classified.message)}</div>
-                            </div>
-                        `;
-                    } else {
-                        html += `
-                            <div class="p-3 bg-slate-950 border border-amber-500/40 rounded-xl space-y-1">
-                                <div class="flex items-center justify-between font-bold text-amber-400">
-                                    <span>${escapeHtml(p.name)}</span>
-                                    <span>⚠️ CHƯA KIỂM TRA ĐƯỢC (không phải lỗi Token)</span>
-                                </div>
-                                <div class="text-[10px] text-slate-400 font-mono">${escapeHtml(classified ? classified.message : err.message)}</div>
-                            </div>
-                        `;
-                    }
-                }
-
-                // Giãn cách nhẹ giữa mỗi lần kiểm tra để tránh dội request gây rate-limit
-                await new Promise(res => setTimeout(res, 300));
-            }
-
-            container.innerHTML = html;
         }
 
         function openCommentTemplatesModal() {
