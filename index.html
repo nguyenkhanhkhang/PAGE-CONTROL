@@ -984,7 +984,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
 
             <div class="relative mb-3">
                 <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                <input id="unassigned-picker-search" oninput="renderUnassignedPickerList()" type="text" placeholder="Tìm nhanh tên tệp đã nạp từ ổ đĩa máy..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500">
+                <input id="unassigned-picker-search" oninput="scheduleRender('unassigned-picker', renderUnassignedPickerList)" type="text" placeholder="Tìm nhanh tên tệp đã nạp từ ổ đĩa máy..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-cyan-500">
             </div>
 
             <div id="unassigned-picker-grid" class="grid grid-cols-2 sm:grid-cols-3 gap-2.5 overflow-y-auto flex-1 p-2 bg-slate-950 border border-slate-800 rounded-xl"></div>
@@ -1170,7 +1170,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                         <div class="flex items-center gap-2">
                             <div class="relative w-44">
                                 <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-[10px]"></i>
-                                <input type="text" id="matrix-table-search" oninput="renderLocalExcelPreviewTable()" placeholder="Lọc theo tên file..." class="w-full bg-slate-900 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-cyan-500">
+                <input type="text" id="matrix-table-search" oninput="scheduleRender('excel-preview', renderLocalExcelPreviewTable)" placeholder="Lọc theo tên file..." class="w-full bg-slate-900 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-cyan-500">
                             </div>
                             <label class="flex items-center text-[11px] text-slate-300 cursor-pointer">
                                 <input type="checkbox" id="chk-auto-create-folders" class="accent-teal-500 w-3.5 h-3.5 rounded mr-1.5" checked>
@@ -1372,7 +1372,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         <div class="glass-panel rounded-2xl p-4 mb-5 flex flex-col xl:flex-row gap-4 justify-between items-center shadow-lg">
             <div class="relative w-full xl:w-96">
                 <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                <input id="page-search" oninput="renderPages()" type="text" placeholder="Tìm Fanpage theo Tên hoặc ID..."
+                <input id="page-search" oninput="scheduleRender('pages', renderPages)" type="text" placeholder="Tìm Fanpage theo Tên hoặc ID..."
                     class="w-full bg-slate-950/90 border border-slate-800 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition">
             </div>
             <div class="flex flex-wrap gap-2.5 w-full xl:w-auto justify-end items-center">
@@ -2015,7 +2015,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                                 </button>
                             </div>
                         </div>
-                        <textarea id="publisher-content" oninput="selectedPublisherSourceLibraryPostId = null; updatePublisherPreview()" rows="3" placeholder="Nhập văn bản... Hoặc tích chọn nhiều bài viết từ Kho ở ô trên để tự động lên lịch ma trận. Hỗ trợ Spintax {Chào bạn|Xin chào} & @followers." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 focus:outline-none focus:border-orange-500 leading-relaxed font-sans"></textarea>
+                        <textarea id="publisher-content" oninput="selectedPublisherSourceLibraryPostId = null; scheduleRender('publisher-preview', updatePublisherPreview, 140)" rows="3" placeholder="Nhập văn bản... Hoặc tích chọn nhiều bài viết từ Kho ở ô trên để tự động lên lịch ma trận. Hỗ trợ Spintax {Chào bạn|Xin chào} & @followers." class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3 text-slate-100 focus:outline-none focus:border-orange-500 leading-relaxed font-sans"></textarea>
                     </div>
 
                     <div id="publisher-media-wrap" class="hidden space-y-2.5">
@@ -2053,7 +2053,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                         </div>
 
                         <div id="media-source-url-container" class="hidden">
-                            <input id="publisher-media-url" oninput="updatePublisherPreview()" type="text" placeholder="https://domain.com/image.jpg hoặc https://domain.com/video.mp4" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-orange-500">
+                            <input id="publisher-media-url" oninput="scheduleRender('publisher-preview', updatePublisherPreview, 140)" type="text" placeholder="https://domain.com/image.jpg hoặc https://domain.com/video.mp4" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 font-mono text-xs focus:outline-none focus:border-orange-500">
                         </div>
                     </div>
                 </div>
@@ -2158,7 +2158,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             <div class="flex flex-col sm:flex-row gap-2 mb-3">
                 <div class="relative flex-1">
                     <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                    <input id="quick-picker-search" oninput="renderQuickPickerList()" type="text" placeholder="Tìm nhanh nội dung bài viết..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-teal-500">
+                <input id="quick-picker-search" oninput="scheduleRender('quick-picker', renderQuickPickerList)" type="text" placeholder="Tìm nhanh nội dung bài viết..." class="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-100 focus:outline-none focus:border-teal-500">
                 </div>
                 <select id="quick-picker-folder-filter" onchange="renderQuickPickerList()" class="bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-teal-300 font-bold focus:outline-none">
                     <option value="all">📁 Tất cả thư mục</option>
@@ -2820,6 +2820,16 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
     <script>
         // --- GLOBAL STATE ---
+        const renderTimers = new Map();
+        function scheduleRender(key, renderFn, delay = 120) {
+            const pending = renderTimers.get(key);
+            if (pending) clearTimeout(pending);
+            renderTimers.set(key, setTimeout(() => {
+                renderTimers.delete(key);
+                renderFn();
+            }, delay));
+        }
+
         let pagesList = [];
         let publisherType = 'post';
         let publishExecutionMode = 'now';
@@ -2830,6 +2840,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         let mediaCleanupScan = { localOrphans: [], remoteOrphans: [], localScanned: false, remoteScanned: false };
         let pendingLibraryMediaFile = null;
         let removeExistingLibraryMedia = false;
+        let libraryPostModalHiddenDuringSave = false;
         let libraryFolders = [];
         let selectedActiveFolderId = 'all'; 
         let selectedLibraryMediaTypeFilter = 'all'; // PHOTO vs VIDEO Filter
@@ -4226,8 +4237,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         function closeUnassignedPickerModal() {
             document.getElementById('unassigned-picker-modal').classList.add('hidden');
             currentTargetRowForPicker = null;
+            unassignedPickerObjectUrls.forEach(url => URL.revokeObjectURL(url));
+            unassignedPickerObjectUrls.clear();
         }
 
+        const unassignedPickerObjectUrls = new Map();
         function renderUnassignedPickerList() {
             const grid = document.getElementById('unassigned-picker-grid');
             const searchVal = (document.getElementById('unassigned-picker-search')?.value || '').toLowerCase().trim();
@@ -4247,7 +4261,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
             grid.innerHTML = filtered.map(f => {
                 const isVideo = f.type.startsWith('video/');
-                const objUrl = URL.createObjectURL(f);
+                let objUrl = '';
+                if (!isVideo) {
+                    objUrl = unassignedPickerObjectUrls.get(f);
+                    if (!objUrl) {
+                        objUrl = URL.createObjectURL(f);
+                        unassignedPickerObjectUrls.set(f, objUrl);
+                    }
+                }
                 const sizeMb = (f.size / (1024 * 1024)).toFixed(2);
 
                 return `
@@ -4256,7 +4277,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                             ${isVideo ? `
                                 <div class="text-rose-400 text-xl"><i class="fa-solid fa-circle-play"></i></div>
                             ` : `
-                                <img src="${objUrl}" class="w-full h-full object-cover">
+                                <img src="${objUrl}" loading="lazy" decoding="async" class="w-full h-full object-cover">
                             `}
                         </div>
                         <div class="text-[10px] text-slate-200 font-bold font-mono truncate" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
@@ -5338,6 +5359,13 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             mode: 'immediate'
         };
 
+        window.addEventListener('beforeunload', (event) => {
+            const libraryUploadRunning = !!document.getElementById('btn-save-library-post')?.disabled;
+            if (!libraryUploadRunning && !progressEngineState.isRunning) return;
+            event.preventDefault();
+            event.returnValue = '';
+        });
+
         window.onload = function() {
             loadPagesFromStorage();
             loadScheduledQueueFromStorage();
@@ -5560,7 +5588,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
         function closeProgressEngineModal() {
             if (progressEngineState.isRunning && !progressEngineState.isCancelled) {
-                showConfirmDialog('Đóng cửa sổ tiến trình', 'Tiến trình đăng bài vẫn đang chạy ngầm. Bạn có muốn ẩn cửa sổ này không?', () => {
+                showConfirmDialog('Đóng cửa sổ tiến trình', 'Tiến trình đăng bài vẫn tiếp tục trong tab hiện tại. Bạn có muốn ẩn cửa sổ này không? Đừng đóng tab khi tác vụ còn chạy.', () => {
                     document.getElementById('progress-engine-modal').classList.add('hidden');
                 });
             } else {
@@ -7304,6 +7332,17 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const growthFilter = document.getElementById('follower-growth-filter')?.value || 'all';
             const statusFilter = document.getElementById('page-status-filter')?.value || 'all';
             const sortBy = document.getElementById('page-sort')?.value || 'name';
+            const changesByPageId = new Map();
+            const getChanges = pageId => {
+                if (!changesByPageId.has(pageId)) changesByPageId.set(pageId, calculateFollowerChanges(pageId));
+                return changesByPageId.get(pageId);
+            };
+            const selectedChangeFor = changes => {
+                if (periodVal === 'week') return changes.weekChange;
+                if (periodVal === 'month') return changes.monthChange;
+                if (periodVal === 'year') return changes.yearChange;
+                return changes.dayChange;
+            };
 
             let filtered = pagesList.filter(p => {
                 if (batchFilter !== 'all' && getPageImportBatchKey(p) !== batchFilter) return false;
@@ -7313,32 +7352,20 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 if (statusFilter === 'online' && p.error) return false;
                 if (statusFilter === 'error' && !p.error) return false;
 
-                const changes = calculateFollowerChanges(p.id);
-                let currentChange = changes.dayChange;
-                if (periodVal === 'week') currentChange = changes.weekChange;
-                if (periodVal === 'month') currentChange = changes.monthChange;
-                if (periodVal === 'year') currentChange = changes.yearChange;
-
-                if (growthFilter === 'growing' && currentChange <= 0) return false;
-                if (growthFilter === 'declining' && currentChange >= 0) return false;
-                if (growthFilter === 'stable' && currentChange !== 0) return false;
+                if (growthFilter !== 'all') {
+                    const currentChange = selectedChangeFor(getChanges(p.id));
+                    if (growthFilter === 'growing' && currentChange <= 0) return false;
+                    if (growthFilter === 'declining' && currentChange >= 0) return false;
+                    if (growthFilter === 'stable' && currentChange !== 0) return false;
+                }
 
                 return true;
             });
 
             filtered.sort((a, b) => {
-                const changesA = calculateFollowerChanges(a.id);
-                const changesB = calculateFollowerChanges(b.id);
-                
-                let changeValA = changesA.dayChange;
-                let changeValB = changesB.dayChange;
-                if (periodVal === 'week') { changeValA = changesA.weekChange; changeValB = changesB.weekChange; }
-                if (periodVal === 'month') { changeValA = changesA.monthChange; changeValB = changesB.monthChange; }
-                if (periodVal === 'year') { changeValA = changesA.yearChange; changeValB = changesB.yearChange; }
-
                 if (sortBy === 'name') return a.name.localeCompare(b.name);
                 if (sortBy === 'followers-desc') return (b.currentFollowers || 0) - (a.currentFollowers || 0);
-                if (sortBy === 'growth-desc') return changeValB - changeValA;
+                if (sortBy === 'growth-desc') return selectedChangeFor(getChanges(b.id)) - selectedChangeFor(getChanges(a.id));
                 if (sortBy === 'likes-today-desc') return (b.postLikesToday || 0) - (a.postLikesToday || 0);
                 if (sortBy === 'likes-month-desc') return (b.postLikesMonth || 0) - (a.postLikesMonth || 0);
                 return 0;
@@ -7356,7 +7383,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (emptyState) emptyState.classList.add('hidden');
 
             tbody.innerHTML = filtered.map((p) => {
-                const changes = calculateFollowerChanges(p.id);
+                const changes = getChanges(p.id);
                 let selectedChange = changes.dayChange;
                 let periodTag = '24h';
                 if (periodVal === 'week') { selectedChange = changes.weekChange; periodTag = '7 Ngày'; }
@@ -7428,11 +7455,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 `;
             }).join('');
 
-            renderDashboardSummaryCards(filtered);
+            renderDashboardSummaryCards(filtered, changesByPageId);
             updatePageSelectionState();
         }
 
-        function renderDashboardSummaryCards(list) {
+        function renderDashboardSummaryCards(list, cachedChanges = null) {
             const container = document.getElementById('dashboard-summary');
             if (!container) return;
 
@@ -7442,7 +7469,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             let totalGrowing = 0;
             let totalDeclining = 0;
             list.forEach(p => {
-                const ch = calculateFollowerChanges(p.id).dayChange;
+                const ch = (cachedChanges?.get(p.id) || calculateFollowerChanges(p.id)).dayChange;
                 if (ch > 0) totalGrowing++;
                 if (ch < 0) totalDeclining++;
             });
@@ -8141,6 +8168,13 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         function openAddLibraryPostModal() {
+            const saveButton = document.getElementById('btn-save-library-post');
+            if (saveButton?.disabled) {
+                libraryPostModalHiddenDuringSave = false;
+                document.getElementById('add-library-post-modal').classList.remove('hidden');
+                showToast('Đang tải file lên Kho. Tác vụ vẫn chạy; bạn có thể ẩn cửa sổ và mở lại bất cứ lúc nào.', 'info');
+                return;
+            }
             populateFolderDropdownSelects();
             document.getElementById('edit-library-post-id').value = '';
             document.getElementById('library-modal-title').innerHTML = '<i class="fa-solid fa-plus-circle text-teal-400"></i> Thêm Bài Viết Vào Kho Photo / Video';
@@ -8154,7 +8188,13 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         function closeAddLibraryPostModal() {
-            if (document.getElementById('btn-save-library-post')?.disabled) return;
+            if (document.getElementById('btn-save-library-post')?.disabled) {
+                libraryPostModalHiddenDuringSave = true;
+                document.getElementById('add-library-post-modal').classList.add('hidden');
+                showToast('Tải file lên Kho vẫn tiếp tục trong nền của tab hiện tại. Đừng đóng tab cho đến khi hoàn tất.', 'info');
+                return;
+            }
+            libraryPostModalHiddenDuringSave = false;
             document.getElementById('add-library-post-modal').classList.add('hidden');
             pendingLibraryMediaFile = null;
             removeExistingLibraryMedia = false;
@@ -8164,6 +8204,10 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         function editLibraryPost(id) {
+            if (document.getElementById('btn-save-library-post')?.disabled) {
+                openAddLibraryPostModal();
+                return;
+            }
             const item = postLibrary.find(p => p.id === id);
             if (!item) return;
 
@@ -8223,6 +8267,10 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
                     if (!saved) throw new Error('Không thể lưu bản cục bộ của file vào IndexedDB.');
                 } catch (error) {
                     if (localFileId) await deleteMediaBlobFromIDB(localFileId);
+                    if (libraryPostModalHiddenDuringSave) {
+                        libraryPostModalHiddenDuringSave = false;
+                        document.getElementById('add-library-post-modal').classList.remove('hidden');
+                    }
                     showToast('Không thể lưu file vào kho dùng chung: ' + (error.message || String(error)), 'error');
                     return;
                 } finally {
@@ -8272,6 +8320,10 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             } catch (error) {
                 postLibrary = previousLibrary;
                 if (pendingLibraryMediaFile && localFileId) await deleteMediaBlobFromIDB(localFileId);
+                if (libraryPostModalHiddenDuringSave) {
+                    libraryPostModalHiddenDuringSave = false;
+                    document.getElementById('add-library-post-modal').classList.remove('hidden');
+                }
                 showToast('Không thể lưu bài viết vào bộ nhớ trình duyệt. Hãy kiểm tra dung lượng thiết bị.', 'error');
                 return;
             }
