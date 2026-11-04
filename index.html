@@ -2829,7 +2829,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     <div class="w-10 h-10 rounded-xl bg-fuchsia-500/15 border border-fuchsia-400/30 flex items-center justify-center text-fuchsia-300 shrink-0"><i class="fa-solid fa-image"></i></div>
                     <div class="min-w-0">
                         <h3 class="text-sm font-bold text-white">Thay ảnh đại diện hàng loạt</h3>
-                        <p class="text-[11px] text-slate-400 mt-0.5">Chọn số lượng Page, chọn Page cụ thể và áp dụng cùng một ảnh.</p>
+                        <p class="text-[11px] text-slate-400 mt-0.5">Chọn Page theo số lượng hoặc theo lô; dùng một ảnh chung hoặc ảnh ngẫu nhiên từ thư mục.</p>
                     </div>
                 </div>
                 <button id="bulk-avatar-close-top" onclick="closeBulkAvatarModal()" class="text-slate-400 hover:text-white p-1" title="Đóng"><i class="fa-solid fa-xmark text-lg"></i></button>
@@ -2842,11 +2842,18 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                             <span class="block text-[10px] text-slate-400 font-bold uppercase">Số lượng Page cần đổi</span>
                             <input id="bulk-avatar-page-count" type="number" min="1" value="1" onchange="handleBulkAvatarCountChange()" class="w-28 bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-sm font-bold text-fuchsia-200 focus:outline-none focus:border-fuchsia-400">
                         </label>
+                        <label class="space-y-1.5 flex-1 min-w-48">
+                            <span class="block text-[10px] text-slate-400 font-bold uppercase">Chọn theo lô Page</span>
+                            <select id="bulk-avatar-batch-select" onchange="selectBulkAvatarBatch(this.value)" class="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-[11px] text-indigo-200 focus:outline-none focus:border-indigo-400">
+                                <option value="">Chọn lô để chọn Page...</option>
+                            </select>
+                        </label>
                         <div class="flex gap-2">
                             <button type="button" onclick="selectFirstBulkAvatarPages()" class="bg-fuchsia-700 hover:bg-fuchsia-600 text-white text-[10px] font-bold px-3 py-2 rounded-lg transition">Chọn nhanh theo số lượng</button>
                             <button type="button" onclick="clearBulkAvatarSelection()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold px-3 py-2 rounded-lg transition">Bỏ chọn</button>
                         </div>
                     </div>
+                    <p class="text-[10px] text-slate-500">Chọn một lô để tự chọn các Page có Access Token trong lô đó; có thể chỉnh lại lựa chọn thủ công.</p>
 
                     <div class="flex items-center justify-between gap-2">
                         <div id="bulk-avatar-selection-summary" class="text-[11px] text-slate-300 font-bold">0 / 1 Page đã chọn</div>
@@ -7406,6 +7413,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             countInput.max = String(selectablePageCount);
             countInput.value = String(Math.max(1, Math.min(selectablePageCount, bulkAvatarSelectedPageIds.size || 1)));
             document.getElementById('bulk-avatar-search').value = '';
+            populateBulkAvatarBatchSelect();
             document.getElementById('bulk-avatar-form').disabled = false;
             document.getElementById('bulk-avatar-progress-wrap').classList.add('hidden');
             document.getElementById('bulk-avatar-results').innerHTML = '';
@@ -7510,6 +7518,32 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             renderBulkAvatarPageList();
         }
 
+        function populateBulkAvatarBatchSelect() {
+            const select = document.getElementById('bulk-avatar-batch-select');
+            if (!select) return;
+            const batches = getPublisherPageBatches();
+            select.innerHTML = '<option value="">Chọn lô để chọn Page...</option>' + batches.map(batch => {
+                const availableCount = pagesList.filter(page => getPageImportBatchKey(page) === batch.key && !!page.token).length;
+                return `<option value="${escapeHtml(batch.key)}" ${availableCount ? '' : 'disabled'}>${escapeHtml(batch.name)} (${availableCount}/${batch.pageIds.length} Page có token)</option>`;
+            }).join('');
+            select.value = '';
+        }
+
+        function selectBulkAvatarBatch(batchKey) {
+            if (!batchKey) return;
+            const batch = getPublisherPageBatches().find(item => item.key === batchKey);
+            if (!batch) return;
+            const batchPages = pagesList.filter(page => getPageImportBatchKey(page) === batchKey && !!page.token);
+            if (!batchPages.length) {
+                showToast('Lô này không có Page với Access Token.', 'warning');
+                return;
+            }
+            bulkAvatarSelectedPageIds = new Set(batchPages.map(page => String(page.id)));
+            document.getElementById('bulk-avatar-page-count').value = String(batchPages.length);
+            bulkAvatarCompleted = false;
+            renderBulkAvatarPageList();
+        }
+
         function selectFirstBulkAvatarPages() {
             const count = getBulkAvatarTargetCount();
             const sortedPages = [...pagesList].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
@@ -7572,6 +7606,17 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         function updateBulkAvatarSelectionSummary() {
             const selected = bulkAvatarSelectedPageIds.size;
             const target = getBulkAvatarTargetCount();
+            const batchSelect = document.getElementById('bulk-avatar-batch-select');
+            if (batchSelect) {
+                const selectedIds = bulkAvatarSelectedPageIds;
+                const matchingBatch = getPublisherPageBatches().find(batch => {
+                    const tokenPageIds = pagesList
+                        .filter(page => getPageImportBatchKey(page) === batch.key && !!page.token)
+                        .map(page => String(page.id));
+                    return tokenPageIds.length > 0 && tokenPageIds.length === selectedIds.size && tokenPageIds.every(id => selectedIds.has(id));
+                });
+                batchSelect.value = matchingBatch ? matchingBatch.key : '';
+            }
             const summary = document.getElementById('bulk-avatar-selection-summary');
             if (summary) {
                 summary.textContent = selected > target
