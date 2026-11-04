@@ -2895,6 +2895,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 </div>
                 <div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div id="bulk-avatar-progress-fill" class="h-full w-0 bg-gradient-to-r from-fuchsia-600 to-pink-400 transition-all"></div></div>
                 <div id="bulk-avatar-current-page" class="text-[10px] text-slate-400 mt-2"></div>
+                <p class="text-[9px] text-slate-500 mt-1">Có thể thu nhỏ cửa sổ trong lúc cập nhật; tiến trình vẫn tiếp tục chạy.</p>
                 <div id="bulk-avatar-results" class="mt-2 max-h-36 overflow-y-auto space-y-1"></div>
             </div>
 
@@ -2904,6 +2905,19 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     <i class="fa-solid fa-cloud-arrow-up"></i> Cập nhật ảnh đại diện
                 </button>
             </div>
+        </div>
+    </div>
+
+    <div id="bulk-avatar-background-task" class="hidden fixed right-5 bottom-5 z-[165] w-80 max-w-[calc(100vw-2rem)] bg-slate-900 border border-fuchsia-500/40 rounded-xl p-3 shadow-2xl shadow-black/50">
+        <div class="flex items-center gap-2 mb-2">
+            <i id="bulk-avatar-background-icon" class="fa-solid fa-spinner fa-spin text-fuchsia-300"></i>
+            <span id="bulk-avatar-background-label" class="flex-1 text-[11px] font-bold text-slate-100">Đang cập nhật ảnh đại diện...</span>
+            <button id="bulk-avatar-background-dismiss" onclick="dismissBulkAvatarBackgroundTask()" class="hidden text-slate-500 hover:text-white" title="Ẩn thông báo"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div id="bulk-avatar-background-fill" class="h-full w-0 bg-gradient-to-r from-fuchsia-600 to-pink-400 transition-all"></div></div>
+        <div class="flex items-center justify-between gap-2 mt-2">
+            <span id="bulk-avatar-background-count" class="text-[10px] text-slate-400 font-mono">0 / 0 Page</span>
+            <button id="bulk-avatar-background-open" onclick="reopenBulkAvatarProgress()" class="text-[10px] text-fuchsia-200 hover:text-white font-bold">Mở tiến trình</button>
         </div>
     </div>
 
@@ -7396,6 +7410,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         }
 
         function openBulkAvatarModal() {
+            if (bulkAvatarRunning) {
+                reopenBulkAvatarProgress();
+                return;
+            }
             if (!pagesList.length) {
                 showToast('Chưa có Fanpage nào để thay ảnh đại diện.', 'warning');
                 return;
@@ -7419,6 +7437,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             document.getElementById('bulk-avatar-results').innerHTML = '';
             document.getElementById('bulk-avatar-close-top').disabled = false;
             document.getElementById('bulk-avatar-close-bottom').disabled = false;
+            document.getElementById('bulk-avatar-close-top').title = 'Đóng';
+            document.getElementById('bulk-avatar-close-bottom').textContent = 'Đóng';
+            document.getElementById('bulk-avatar-background-task').classList.add('hidden');
+            document.getElementById('bulk-avatar-background-dismiss').classList.add('hidden');
+            document.getElementById('bulk-avatar-background-open').textContent = 'Mở tiến trình';
             bulkAvatarCompleted = false;
             clearBulkAvatarFile();
             renderBulkAvatarPageList();
@@ -7426,12 +7449,23 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         }
 
         function closeBulkAvatarModal() {
+            document.getElementById('bulk-avatar-modal').classList.add('hidden');
             if (bulkAvatarRunning) {
-                showToast('Đang cập nhật ảnh đại diện. Hãy chờ tiến trình kết thúc.', 'info');
+                document.getElementById('bulk-avatar-background-task').classList.remove('hidden');
                 return;
             }
-            document.getElementById('bulk-avatar-modal').classList.add('hidden');
+            document.getElementById('bulk-avatar-background-task').classList.add('hidden');
             clearBulkAvatarFile();
+        }
+
+        function reopenBulkAvatarProgress() {
+            document.getElementById('bulk-avatar-modal').classList.remove('hidden');
+            document.getElementById('bulk-avatar-background-task').classList.add('hidden');
+        }
+
+        function dismissBulkAvatarBackgroundTask() {
+            if (bulkAvatarRunning) return;
+            document.getElementById('bulk-avatar-background-task').classList.add('hidden');
         }
 
         function clearBulkAvatarFile() {
@@ -7655,6 +7689,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             document.getElementById('bulk-avatar-progress-count').textContent = `${done} / ${total} · ${successCount} thành công · ${failedCount} lỗi`;
             document.getElementById('bulk-avatar-progress-fill').style.width = `${percentage}%`;
             document.getElementById('bulk-avatar-current-page').textContent = pageName ? `Đang xử lý: ${pageName}` : '';
+            document.getElementById('bulk-avatar-background-count').textContent = `${done} / ${total} Page · ${successCount} thành công · ${failedCount} lỗi`;
+            document.getElementById('bulk-avatar-background-fill').style.width = `${percentage}%`;
+            if (bulkAvatarRunning) {
+                document.getElementById('bulk-avatar-background-label').textContent = pageName ? `Đang cập nhật: ${pageName}` : 'Đang cập nhật ảnh đại diện...';
+                if (document.getElementById('bulk-avatar-modal').classList.contains('hidden')) {
+                    document.getElementById('bulk-avatar-background-task').classList.remove('hidden');
+                }
+            }
         }
 
         function shuffleBulkAvatarFiles(files) {
@@ -7696,8 +7738,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             bulkAvatarRunning = true;
             bulkAvatarCompleted = false;
             document.getElementById('bulk-avatar-form').disabled = true;
-            document.getElementById('bulk-avatar-close-top').disabled = true;
-            document.getElementById('bulk-avatar-close-bottom').disabled = true;
+            document.getElementById('bulk-avatar-close-top').disabled = false;
+            document.getElementById('bulk-avatar-close-bottom').disabled = false;
+            document.getElementById('bulk-avatar-close-top').title = 'Thu nhỏ; tiến trình vẫn tiếp tục chạy';
+            document.getElementById('bulk-avatar-close-bottom').textContent = 'Thu nhỏ · tiếp tục chạy';
+            document.getElementById('bulk-avatar-background-task').classList.add('hidden');
+            document.getElementById('bulk-avatar-background-dismiss').classList.add('hidden');
+            document.getElementById('bulk-avatar-background-open').textContent = 'Mở tiến trình';
+            document.getElementById('bulk-avatar-background-icon').className = 'fa-solid fa-spinner fa-spin text-fuchsia-300';
             document.getElementById('bulk-avatar-progress-wrap').classList.remove('hidden');
             document.getElementById('bulk-avatar-results').innerHTML = '';
             document.getElementById('bulk-avatar-progress-label').textContent = 'Đang cập nhật ảnh đại diện...';
@@ -7734,8 +7782,18 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             document.getElementById('bulk-avatar-form').disabled = false;
             document.getElementById('bulk-avatar-close-top').disabled = false;
             document.getElementById('bulk-avatar-close-bottom').disabled = false;
+            document.getElementById('bulk-avatar-close-top').title = 'Đóng';
+            document.getElementById('bulk-avatar-close-bottom').textContent = 'Đóng';
             document.getElementById('bulk-avatar-progress-label').textContent = `Hoàn tất: ${successCount} thành công, ${failedCount} lỗi.`;
             document.getElementById('bulk-avatar-current-page').textContent = '';
+            document.getElementById('bulk-avatar-background-label').textContent = `Hoàn tất: ${successCount} thành công, ${failedCount} lỗi.`;
+            document.getElementById('bulk-avatar-background-count').textContent = `${targets.length} Page đã xử lý`;
+            document.getElementById('bulk-avatar-background-icon').className = `fa-solid ${failedCount ? 'fa-circle-exclamation text-amber-300' : 'fa-circle-check text-emerald-300'}`;
+            document.getElementById('bulk-avatar-background-dismiss').classList.remove('hidden');
+            document.getElementById('bulk-avatar-background-open').textContent = 'Xem kết quả';
+            if (document.getElementById('bulk-avatar-modal').classList.contains('hidden')) {
+                document.getElementById('bulk-avatar-background-task').classList.remove('hidden');
+            }
             updateBulkAvatarSelectionSummary();
             showToast(`Đã xử lý ${targets.length} Page: ${successCount} thành công, ${failedCount} lỗi.`, failedCount ? (successCount ? 'warning' : 'error') : 'success');
         }
