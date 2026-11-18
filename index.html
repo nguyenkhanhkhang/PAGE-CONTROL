@@ -4832,41 +4832,25 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             document.getElementById('publisher-modal').classList.add('hidden');
         }
 
-        function populatePublisherPagesList(selectedBatchKeys = null, selectedPageIds = null) {
+        function populatePublisherPagesList() {
             const list = document.getElementById('publisher-pages-list');
             if (!list) return;
-            const batches = getPublisherPageBatches();
-            const validBatchKeys = new Set(batches.map(batch => batch.key));
-            const selectedKeys = selectedBatchKeys === null
-                ? new Set(validBatchKeys)
-                : new Set(selectedBatchKeys.map(String).filter(key => validBatchKeys.has(key)));
-            const checkedPageIds = selectedPageIds === null ? null : new Set([...selectedPageIds].map(String));
-            renderPublisherPageBatchControls(selectedKeys);
-
             if (!pagesList.length) {
                 list.innerHTML = '<div class="text-slate-500 text-xs p-2">Chưa có Fanpage nào trong hệ thống.</div>';
+                renderPublisherPageBatchControls();
                 updatePublisherPageSelectionUI();
                 return;
             }
-
-            const visiblePages = pagesList.filter(page => selectedKeys.has(getPageImportBatchKey(page)));
-            if (!visiblePages.length) {
-                list.innerHTML = '<div class="text-slate-500 text-xs p-2">Chưa chọn lô có Fanpage để đăng.</div>';
-                updatePublisherPageSelectionUI();
-                return;
-            }
-
-            list.innerHTML = visiblePages.map(page => {
-                const pageUrl = `https://www.facebook.com/${encodeURIComponent(String(page.pageId || ''))}`;
-                return `
-                    <div class="flex items-center justify-between gap-2 p-2 rounded-xl bg-slate-900 hover:bg-slate-800 transition">
-                        <div class="flex items-center gap-2 min-w-0">
-                            <input type="checkbox" value="${escapeHtml(String(page.id))}" onchange="updatePublisherPageSelectionUI(); updatePublisherPreview(); updatePublisherNowLibraryDistributionControl()" class="publisher-page-checkbox accent-orange-500 w-4 h-4 rounded cursor-pointer" ${!checkedPageIds || checkedPageIds.has(String(page.id)) ? 'checked' : ''}>
-                            <a href="${pageUrl}" target="_blank" rel="noopener noreferrer" title="Mở Fanpage trong tab mới" class="font-bold text-white text-xs truncate hover:text-orange-300 hover:underline">${escapeHtml(page.name)}</a>
-                        </div>
-                        <a href="${pageUrl}" target="_blank" rel="noopener noreferrer" class="text-[10px] text-slate-500 font-mono hover:text-cyan-300 whitespace-nowrap" title="Xem Fanpage">ID: ${escapeHtml(String(page.pageId || ''))} <i class="fa-solid fa-arrow-up-right-from-square ml-1"></i></a>
-                    </div>`;
-            }).join('');
+            list.innerHTML = pagesList.map(p => `
+                <label class="flex items-center justify-between p-2 rounded-xl bg-slate-900 hover:bg-slate-800 transition cursor-pointer">
+                    <div class="flex items-center gap-2 min-w-0">
+                        <input type="checkbox" value="${p.id}" onchange="updatePublisherPageSelectionUI(); updatePublisherPreview(); updatePublisherNowLibraryDistributionControl()" class="publisher-page-checkbox accent-orange-500 w-4 h-4 rounded cursor-pointer" checked>
+                        <span class="font-bold text-white text-xs truncate">${escapeHtml(p.name)}</span>
+                    </div>
+                    <span class="text-[10px] text-slate-500 font-mono">ID: ${p.pageId}</span>
+                </label>
+            `).join('');
+            renderPublisherPageBatchControls();
             updatePublisherPageSelectionUI();
         }
 
@@ -4890,73 +4874,48 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             return [...batches.values()];
         }
 
-        function renderPublisherPageBatchControls(selectedBatchKeys) {
+        function renderPublisherPageBatchControls() {
             const wrap = document.getElementById('publisher-page-batch-controls');
             if (!wrap) return;
             const batches = getPublisherPageBatches();
             if (!batches.length) {
-                wrap.innerHTML = '<div class="text-[10px] text-slate-500">Chưa có lô Page.</div>';
+                wrap.innerHTML = '';
                 return;
             }
-
-            const selectedKeys = new Set(selectedBatchKeys);
-            wrap.innerHTML = `
-                <div class="w-full space-y-1.5">
-                    <div class="flex flex-wrap items-center gap-2">
-                        <span class="text-[10px] text-slate-400">Lô đăng (có thể chọn nhiều):</span>
-                        <button type="button" onclick="selectAllPublisherBatches(true)" class="text-[10px] text-blue-400 hover:underline">Chọn tất cả lô</button>
-                        <button type="button" onclick="selectAllPublisherBatches(false)" class="text-[10px] text-slate-400 hover:underline">Bỏ chọn lô</button>
-                        <span class="text-[9px] text-slate-500">Đang chọn ${selectedKeys.size}/${batches.length} lô</span>
-                    </div>
-                    <div class="flex flex-wrap gap-1.5 max-h-20 overflow-y-auto">
-                        ${batches.map(batch => `
-                            <label class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-950/40 border border-indigo-500/25 text-[10px] text-indigo-200 cursor-pointer hover:bg-indigo-900/50 transition">
-                                <input type="checkbox" value="${escapeHtml(batch.key)}" ${selectedKeys.has(batch.key) ? 'checked' : ''} onchange="setPublisherPageBatchFilter(this.value, this.checked)" class="publisher-batch-filter-checkbox accent-indigo-400 w-3.5 h-3.5 rounded cursor-pointer">
-                                <span class="max-w-48 truncate">${escapeHtml(batch.name)}</span>
-                                <span class="text-indigo-300/70 font-mono">(${batch.pageIds.length})</span>
-                            </label>`).join('')}
-                    </div>
-                </div>`;
+            wrap.innerHTML = '<span class="text-[10px] text-slate-500 self-center">Chọn nhanh theo lô:</span>' + batches.map(batch => `
+                <label class="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-950/40 border border-indigo-500/25 text-[10px] text-indigo-200 cursor-pointer hover:bg-indigo-900/50 transition">
+                    <input type="checkbox" data-batch-key="${escapeHtml(batch.key)}" onchange="setPublisherPageBatchSelection(this.dataset.batchKey, this.checked)" class="publisher-batch-checkbox accent-indigo-400 w-3.5 h-3.5 rounded cursor-pointer">
+                    <span class="max-w-48 truncate">${escapeHtml(batch.name)}</span>
+                    <span class="text-indigo-300/70 font-mono">(${batch.pageIds.length})</span>
+                </label>
+            `).join('');
+            updatePublisherPageSelectionUI();
         }
 
         function updatePublisherPageSelectionUI() {
             const pageCheckboxes = [...document.querySelectorAll('.publisher-page-checkbox')];
+            const selectedIds = new Set(pageCheckboxes.filter(cb => cb.checked).map(cb => cb.value));
             const selectedCount = pageCheckboxes.filter(cb => cb.checked).length;
             const countLabel = document.getElementById('publisher-selected-pages-count');
             if (countLabel) countLabel.innerText = `Đã chọn: ${selectedCount} / ${pageCheckboxes.length} Page`;
-        }
 
-        function setPublisherPageBatchFilter(batchKey, checked) {
-            const selectedKeys = [...document.querySelectorAll('.publisher-batch-filter-checkbox:checked')].map(cb => cb.value);
-            const selectedPageIds = new Set([...document.querySelectorAll('.publisher-page-checkbox:checked')].map(cb => String(cb.value)));
-            pagesList.filter(page => getPageImportBatchKey(page) === batchKey).forEach(page => {
-                if (checked) selectedPageIds.add(String(page.id));
-                else selectedPageIds.delete(String(page.id));
+            document.querySelectorAll('.publisher-batch-checkbox').forEach(batchCheckbox => {
+                const batchPages = pagesList.filter(page => getPageImportBatchKey(page) === batchCheckbox.dataset.batchKey);
+                const batchSelectedCount = batchPages.filter(page => selectedIds.has(String(page.id))).length;
+                batchCheckbox.checked = batchPages.length > 0 && batchSelectedCount === batchPages.length;
+                batchCheckbox.indeterminate = batchSelectedCount > 0 && batchSelectedCount < batchPages.length;
             });
-            populatePublisherPagesList(selectedKeys, selectedPageIds);
-            updatePublisherPreview();
-            updatePublisherNowLibraryDistributionControl();
         }
 
-        function selectAllPublisherBatches(checked) {
-            const selectedKeys = checked ? getPublisherPageBatches().map(batch => batch.key) : [];
-            populatePublisherPagesList(selectedKeys);
+        function setPublisherPageBatchSelection(batchKey, checked) {
+            const pageMap = new Map(pagesList.map(page => [String(page.id), page]));
+            document.querySelectorAll('.publisher-page-checkbox').forEach(cb => {
+                const page = pageMap.get(cb.value);
+                if (page && getPageImportBatchKey(page) === batchKey) cb.checked = checked;
+            });
+            updatePublisherPageSelectionUI();
             updatePublisherPreview();
             updatePublisherNowLibraryDistributionControl();
-        }
-
-        function movePageToPostingErrorBatch(page) {
-            if (!page) return false;
-            const errorBatchName = 'PAGE LỖI';
-            const existingBatch = getPublisherPageBatches().find(batch => batch.name.trim().toLocaleLowerCase() === errorBatchName.toLocaleLowerCase());
-            const targetBatch = existingBatch || {
-                key: `page_batch_error_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-                name: errorBatchName
-            };
-            if (getPageImportBatchKey(page) === targetBatch.key) return false;
-            page.importBatchId = targetBatch.key;
-            page.importBatchName = targetBatch.name;
-            return true;
         }
         // Trả về danh sách mediaType được phép hiển thị trong Kho theo loại bài đang đăng.
         // 'photo' -> chỉ bài PHOTO. 'video'/'reel' -> chỉ bài dạng VIDEO (gồm Video & Reel).
@@ -5894,7 +5853,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             clearProgressTerminalLogs();
             logProgressTerminal(`🚀 Khởi tạo trạm giám sát: Tổng số ${queueItems.length} tác vụ đăng bài.`, 'system');
             updateProgressEngineUI();
-            let pagesMovedToErrorBatch = false;
 
             for (let i = 0; i < progressEngineState.queue.length; i++) {
                 if (progressEngineState.isCancelled) {
@@ -6001,12 +5959,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     console.error('Publishing Progress Engine Item Error:', err);
                     progressEngineState.failed++;
                     progressEngineState.failedTasks.push(task);
-                    const failedPage = pagesList.find(page => page.id === task.pageLocalId || page.pageId === task.pageId);
-                    if (failedPage && movePageToPostingErrorBatch(failedPage)) {
-                        pagesMovedToErrorBatch = true;
-                        savePagesToStorage();
-                        logProgressTerminal(`📦 Đã chuyển "${failedPage.name}" vào lô "PAGE LỖI" do đăng bài thất bại.`, 'warning');
-                    }
 
                     // V14.6: Đọc thông tin phân loại lỗi (nếu có) để KHÔNG gọi mọi lỗi API là
                     // "lỗi token" một cách mơ hồ nữa. Chỉ đánh dấu Fanpage thật sự hỏng Token
@@ -6053,8 +6005,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 updateProgressEngineUI();
                 showToast(`Đã hoàn tất tiến trình! Thành công: ${progressEngineState.success}, Thất bại: ${progressEngineState.failed}`, progressEngineState.success > 0 ? 'success' : 'error');
             }
-
-            if (pagesMovedToErrorBatch) renderPages();
 
             if (mode === 'bulk_schedule') {
                 scheduledQueue.sort((a, b) => a.scheduledTime - b.scheduledTime);
@@ -7260,55 +7210,22 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         // fetch tới Graph API kèm tự động thử lại theo cấp số nhân (exponential backoff)
         // cho lỗi tạm thời / rate-limit / mất mạng. KHÔNG tự thử lại nếu là lỗi Token thật
         // hoặc thiếu quyền, để tránh tốn thời gian chờ vô ích khi chắc chắn cần Token mới.
-        function getFacebookRetryDelayFromHeaders(headers, fallbackMs) {
-            if (!headers || typeof headers.get !== 'function') return fallbackMs;
-            let estimatedMinutes = 0;
-            const inspectUsage = (value) => {
-                if (!value || typeof value !== 'object') return;
-                if (Array.isArray(value)) {
-                    value.forEach(inspectUsage);
-                    return;
-                }
-                Object.entries(value).forEach(([key, nested]) => {
-                    if (key === 'estimated_time_to_regain_access') {
-                        const minutes = Number(nested);
-                        if (Number.isFinite(minutes) && minutes > estimatedMinutes) estimatedMinutes = minutes;
-                    } else if (nested && typeof nested === 'object') {
-                        inspectUsage(nested);
-                    }
-                });
-            };
-
-            ['x-business-use-case-usage', 'x-business-use-case'].forEach(headerName => {
-                try {
-                    const raw = headers.get(headerName);
-                    if (raw) inspectUsage(JSON.parse(raw));
-                } catch (error) {
-                    // Bỏ qua header không phải JSON; tiếp tục dùng thời gian chờ dự phòng.
-                }
-            });
-            return estimatedMinutes > 0 ? Math.max(fallbackMs, Math.ceil(estimatedMinutes * 60 * 1000)) : fallbackMs;
-        }
-
         async function fetchGraphApiWithRetry(url, options = {}, config = {}) {
             const maxRetries = config.maxRetries ?? 3;
             const baseDelayMs = config.baseDelayMs ?? 2000;
-            const maxDelayMs = config.maxDelayMs ?? 60000;
             const onRetryLog = config.onRetryLog || null;
             let lastClassified = null;
 
             for (let attempt = 0; attempt <= maxRetries; attempt++) {
                 let data;
-                let response = null;
                 try {
-                    response = await fetch(url, options);
-                    data = await response.json();
+                    const res = await fetch(url, options);
+                    data = await res.json();
                 } catch (networkErr) {
                     lastClassified = { kind: 'network', retriable: true, isRealTokenError: false, label: '🌐 Lỗi kết nối mạng', message: 'Mất kết nối tạm thời tới Facebook — hệ thống sẽ tự thử lại.', rawMessage: networkErr.message };
                     if (attempt < maxRetries) {
-                        const retryDelayMs = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt));
-                        if (onRetryLog) onRetryLog(lastClassified, attempt + 1, maxRetries, retryDelayMs);
-                        await new Promise(r => setTimeout(r, retryDelayMs));
+                        if (onRetryLog) onRetryLog(lastClassified, attempt + 1, maxRetries);
+                        await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
                         continue;
                     }
                     const e = new Error(lastClassified.message);
@@ -7322,10 +7239,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 lastClassified = classified;
 
                 if (classified.retriable && attempt < maxRetries) {
-                    let retryDelayMs = Math.min(maxDelayMs, baseDelayMs * Math.pow(2, attempt));
-                    if (classified.kind === 'rate_limit') retryDelayMs = getFacebookRetryDelayFromHeaders(response?.headers, retryDelayMs);
-                    if (onRetryLog) onRetryLog(classified, attempt + 1, maxRetries, retryDelayMs);
-                    await new Promise(r => setTimeout(r, retryDelayMs));
+                    if (onRetryLog) onRetryLog(classified, attempt + 1, maxRetries);
+                    await new Promise(r => setTimeout(r, baseDelayMs * Math.pow(2, attempt)));
                     continue;
                 }
 
@@ -7851,17 +7766,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     form.append('access_token', page.token);
                     form.append('source', imageFile, imageFile.name);
                     const endpoint = `https://graph.facebook.com/v24.0/${encodeURIComponent(page.pageId)}/picture`;
-                    await fetchGraphApiWithRetry(endpoint, { method: 'POST', body: form }, {
-                        maxRetries: 4,
-                        baseDelayMs: 5000,
-                        maxDelayMs: 60000,
-                        onRetryLog: (classified, attempt, maxRetries, delayMs) => {
-                            const waitLabel = delayMs >= 60000 ? `${Math.ceil(delayMs / 60000)} phút` : `${Math.ceil(delayMs / 1000)} giây`;
-                            const reason = classified.kind === 'rate_limit' ? 'Facebook đang giới hạn yêu cầu' : 'Kết nối Facebook tạm thời gián đoạn';
-                            document.getElementById('bulk-avatar-current-page').textContent = `${reason} với ${pageName}; thử lại sau ${waitLabel} (${attempt}/${maxRetries})`;
-                            document.getElementById('bulk-avatar-progress-label').textContent = `Đang chờ Facebook cho Page ${index + 1}/${targets.length}`;
-                        }
-                    });
+                    await fetchGraphApiWithRetry(endpoint, { method: 'POST', body: form }, { maxRetries: 2, baseDelayMs: 1800 });
                     successCount++;
                     appendBulkAvatarResult(pageName, true, `Đã đổi ảnh đại diện bằng “${imageFile.name}”.`);
                 } catch (error) {
@@ -7869,7 +7774,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     const message = String(error?.fbClassified?.message || error?.message || 'Lỗi không xác định').slice(0, 240);
                     appendBulkAvatarResult(pageName, false, message);
                 }
-                if (index + 1 < targets.length) await new Promise(resolve => setTimeout(resolve, 1200));
                 updateBulkAvatarProgress(index + 1, targets.length, index + 1 < targets.length ? String(targets[index + 1].name || targets[index + 1].pageId || 'Page') : '', successCount, failedCount);
             }
 
@@ -8264,109 +8168,41 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const tokens = raw.split('\n').map(t => t.trim()).filter(Boolean);
             const btn = document.getElementById('btn-import-user-token');
             btn.disabled = true;
-            const pagesById = new Map();
-            const scanIssues = [];
-            const apiBaseUrl = 'https://graph.facebook.com/v24.0/me/accounts';
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin font-bold"></i> Đang quét API /me/accounts...';
 
-            for (let tokenIndex = 0; tokenIndex < tokens.length; tokenIndex++) {
-                const userToken = tokens[tokenIndex];
-                const startUrl = new URL(apiBaseUrl);
-                startUrl.searchParams.set('access_token', userToken);
-                startUrl.searchParams.set('limit', '5000');
-                startUrl.searchParams.set('summary', 'total_count');
-                let nextUrl = startUrl.toString();
-                let expectedCount = null;
-                const tokenPageIds = new Set();
-                const visitedUrls = new Set();
-                const visitedCursors = new Set();
-                let lastAfterCursor = '';
-                btn.innerHTML = `<i class="fa-solid fa-spinner fa-spin font-bold"></i> Đang quét token ${tokenIndex + 1}/${tokens.length}...`;
+            pendingImportTokenPages = [];
 
+            for (let userToken of tokens) {
                 try {
-                    while (nextUrl) {
-                        if (visitedUrls.has(nextUrl)) {
-                            scanIssues.push(`Token ${tokenIndex + 1}: liên kết phân trang bị lặp.`);
-                            break;
-                        }
-                        visitedUrls.add(nextUrl);
-                        let data;
-                        try {
-                            data = await fetchGraphApiWithRetry(nextUrl, {}, { maxRetries: 3, baseDelayMs: 1500, maxDelayMs: 15000 });
-                        } catch (requestError) {
-                            if (lastAfterCursor && !visitedCursors.has(lastAfterCursor)) {
-                                visitedCursors.add(lastAfterCursor);
-                                const cursorUrl = new URL(startUrl.toString());
-                                cursorUrl.searchParams.set('after', lastAfterCursor);
-                                const fallbackUrl = cursorUrl.toString();
-                                if (!visitedUrls.has(fallbackUrl)) {
-                                    nextUrl = fallbackUrl;
-                                    continue;
-                                }
-                            }
-                            throw requestError;
-                        }
-                        const reportedTotal = Number(data.summary?.total_count);
-                        if (expectedCount === null && Number.isFinite(reportedTotal)) expectedCount = reportedTotal;
+                    const res = await fetch(`https://graph.facebook.com/v24.0/me/accounts?access_token=${encodeURIComponent(userToken)}&limit=200`);
+                    const data = await res.json();
 
-                        const rows = Array.isArray(data.data) ? data.data : [];
-                        rows.forEach(page => {
-                            const pageId = String(page?.id || '');
-                            if (!pageId) return;
-                            tokenPageIds.add(pageId);
-                            if (!page.access_token || pagesById.has(pageId)) return;
-                            pagesById.set(pageId, {
-                                name: page.name || pageId,
-                                pageId,
-                                token: page.access_token,
+                    if (data.data && Array.isArray(data.data)) {
+                        data.data.forEach(p => {
+                            pendingImportTokenPages.push({
+                                name: p.name,
+                                pageId: p.id,
+                                token: p.access_token,
                                 selected: true
                             });
                         });
-
-                        let pagingNext = String(data.paging?.next || '').replace(/&amp;/gi, '&');
-                        const afterCursor = String(data.paging?.cursors?.after || '');
-                        lastAfterCursor = afterCursor;
-                        if (pagingNext && !visitedUrls.has(pagingNext)) {
-                            nextUrl = pagingNext;
-                        } else if ((expectedCount === null || tokenPageIds.size < expectedCount) && afterCursor && !visitedCursors.has(afterCursor)) {
-                            visitedCursors.add(afterCursor);
-                            const cursorUrl = new URL(startUrl.toString());
-                            cursorUrl.searchParams.set('after', afterCursor);
-                            nextUrl = cursorUrl.toString();
-                        } else {
-                            nextUrl = '';
-                        }
-
-                        if (nextUrl && rows.length === 0) {
-                            if (expectedCount !== null && tokenPageIds.size < expectedCount) {
-                                scanIssues.push(`Token ${tokenIndex + 1}: Meta không trả thêm Page; hiện quét được ${tokenPageIds.size}/${expectedCount}.`);
-                            }
-                            break;
-                        }
-                    }
-
-                    if (expectedCount !== null && tokenPageIds.size < expectedCount) {
-                        scanIssues.push(`Token ${tokenIndex + 1}: quét được ${tokenPageIds.size}/${expectedCount} Page.`);
                     }
                 } catch (err) {
-                    const detail = String(err?.fbClassified?.message || err?.message || 'Lỗi quét token.');
-                    scanIssues.push(`Token ${tokenIndex + 1}: quét được ${tokenPageIds.size}${expectedCount === null ? '' : `/${expectedCount}`} Page; ${detail}`);
                     console.error('Scan user token error:', err);
                 }
             }
 
-            pendingImportTokenPages = [...pagesById.values()];
             btn.disabled = false;
             btn.innerHTML = '<i class="fa-solid fa-magnifying-glass font-bold"></i> Quét Danh Sách Fanpage Từ Token';
 
             if (!pendingImportTokenPages.length) {
-                showToast(scanIssues.length ? `Quét thất bại: ${scanIssues[0]}` : 'Không tìm thấy Fanpage nào từ các User Token vừa dán!', 'error');
+                showToast('Không tìm thấy Fanpage nào từ các User Token vừa dán!', 'error');
                 return;
             }
 
             renderImportTokenPagesList();
             document.getElementById('import-token-preview-container').classList.remove('hidden');
-            const issueSummary = scanIssues.length ? ` · ${scanIssues.join(' | ')}` : '';
-            showToast(`Đã tìm thấy ${pendingImportTokenPages.length} Fanpage${issueSummary}!`, scanIssues.length ? 'warning' : 'success');
+            showToast(`Đã tìm thấy ${pendingImportTokenPages.length} Fanpage!`, 'success');
         }
 
         function renderImportTokenPagesList() {
