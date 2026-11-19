@@ -58,10 +58,7 @@
             if (p.get('repo')) cfg.repo = p.get('repo');
             if (p.get('branch')) cfg.branch = p.get('branch');
             saveCfg();
-            // Preserve other hash parameters while removing only the GitHub Sync setup values.
-            p.delete('ghs');
-            const remainingHash = p.toString();
-            history.replaceState(null, '', location.pathname + location.search + (remainingHash ? '#' + remainingHash : ''));
+            history.replaceState(null, '', location.pathname + location.search);
         } catch (e) { /* bỏ qua */ }
     })();
 
@@ -1360,9 +1357,6 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     </button>
                     <button onclick="openImportModal()" class="bg-slate-800 hover:bg-slate-700 text-emerald-400 text-xs font-semibold px-3 py-2 rounded-xl transition border border-slate-700 flex items-center gap-2 shadow">
                         <i class="fa-solid fa-file-import"></i> Import Page
-                    </button>
-                    <button id="gpm-connect-btn" onclick="openGpmProfileManager()" class="bg-slate-800 hover:bg-slate-700 text-cyan-300 text-xs font-semibold px-3 py-2 rounded-xl transition border border-cyan-500/30 flex items-center gap-2 shadow">
-                        <i class="fa-solid fa-window-restore"></i> <span id="gpm-connect-label">GPM: Chưa kết nối</span>
                     </button>
                     <button onclick="openBulkAvatarModal()" class="bg-gradient-to-r from-fuchsia-600 to-pink-600 hover:from-fuchsia-500 hover:to-pink-500 text-white text-xs font-bold px-3.5 py-2 rounded-xl transition flex items-center gap-2 shadow-lg shadow-fuchsia-950/40">
                         <i class="fa-solid fa-image"></i> Đổi Avatar Page
@@ -2835,47 +2829,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         </div>
     </div>
 
-    <!-- GPM PROFILE LINK MODAL -->
-    <div id="gpm-profile-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center hidden z-[130] p-3 md:p-5">
-        <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-full max-w-2xl max-h-[90vh] overflow-y-auto shadow-2xl animate-fade-in">
-            <div class="flex items-center justify-between gap-3 mb-4 pb-3 border-b border-slate-800">
-                <div class="flex items-center gap-3 min-w-0">
-                    <div class="w-10 h-10 rounded-xl bg-cyan-500/15 border border-cyan-400/30 flex items-center justify-center text-cyan-300 shrink-0"><i class="fa-solid fa-window-restore"></i></div>
-                    <div class="min-w-0">
-                        <h3 class="text-sm font-bold text-white">GPM Login · Profile riêng cho Page</h3>
-                        <p id="gpm-current-page-label" class="text-[11px] text-slate-400 mt-0.5">Chọn Page để gắn với một GPM Profile.</p>
-                    </div>
-                </div>
-                <button onclick="closeGpmProfileManager()" class="text-slate-400 hover:text-white p-1" title="Đóng"><i class="fa-solid fa-xmark text-lg"></i></button>
-            </div>
-
-            <div class="space-y-3">
-                <div id="gpm-bridge-status" class="rounded-xl border border-slate-700 bg-slate-950/70 px-3 py-2 text-[11px] text-slate-300">Chưa kiểm tra kết nối GPM.</div>
-                <div class="flex flex-wrap items-center gap-2">
-                    <input id="gpm-profile-search" type="text" oninput="renderGpmProfileOptions()" placeholder="Tìm GPM Profile theo tên hoặc ID..." class="flex-1 min-w-52 bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-100 focus:outline-none focus:border-cyan-500">
-                    <button onclick="refreshGpmProfiles(true)" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-[11px] font-semibold px-3 py-2 rounded-lg border border-slate-700"><i class="fa-solid fa-rotate mr-1"></i>Làm mới</button>
-                </div>
-                <select id="gpm-profile-select" size="10" class="w-full bg-slate-950 border border-slate-800 rounded-xl p-2 text-[11px] text-slate-100 focus:outline-none focus:border-cyan-500" onchange="updateGpmProfileSelectionHint()">
-                    <option value="">Kết nối GPM để tải danh sách Profile...</option>
-                </select>
-                <div id="gpm-profile-selection-hint" class="text-[10px] text-slate-400 min-h-4">Mỗi Profile chỉ có thể gắn với một Page trên máy này.</div>
-                <p class="text-[10px] text-slate-500 leading-relaxed">Phiên Facebook được lưu trong GPM Profile trên máy này. Cài bridge tự khởi động một lần trên máy đã cài GPM Login; từ lần sau Dashboard tự kết nối khi bạn mở trang.</p>
-            </div>
-
-            <div class="flex flex-wrap justify-between gap-2 mt-4 pt-3 border-t border-slate-800">
-                <div class="flex flex-wrap gap-2">
-                    <button onclick="createGpmProfileForCurrentPage()" class="bg-indigo-700 hover:bg-indigo-600 text-white text-[11px] font-bold px-3 py-2 rounded-lg"><i class="fa-solid fa-plus mr-1"></i>Tạo Profile cho Page</button>
-                    <button onclick="clearGpmPageMapping()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold px-3 py-2 rounded-lg">Gỡ liên kết</button>
-                </div>
-                <div class="flex flex-wrap justify-end gap-2">
-                    <button onclick="closeGpmProfileManager()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] font-semibold px-3 py-2 rounded-lg">Đóng</button>
-                    <button onclick="saveGpmProfileMapping()" class="bg-cyan-700 hover:bg-cyan-600 text-white text-[11px] font-bold px-3 py-2 rounded-lg">Gắn Profile</button>
-                    <button onclick="saveAndOpenGpmProfile()" class="bg-emerald-700 hover:bg-emerald-600 text-white text-[11px] font-bold px-3 py-2 rounded-lg"><i class="fa-solid fa-play mr-1"></i>Mở trình duyệt</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- BULK PAGE AVATAR UPDATE MODAL -->
     <div id="bulk-avatar-modal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center hidden z-[125] p-3 md:p-5">
         <div class="bg-slate-900 border border-slate-800 rounded-2xl p-5 w-full max-w-5xl max-h-[92vh] overflow-y-auto shadow-2xl animate-fade-in">
@@ -2981,12 +2934,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
     <script>
         // --- GLOBAL STATE ---
         let pagesList = [];
-        const GPM_PAGE_MAPPING_KEY = 'ghs_gpm_page_profile_mappings_v1';
-        let gpmPageProfileMappings = {};
-        let gpmProfiles = [];
-        let gpmConnected = false;
-        let currentGpmPageLocalId = null;
-        let gpmBridgeSessionToken = '';
         let bulkAvatarSelectedPageIds = new Set();
         let bulkAvatarSelectedFile = null;
         let bulkAvatarFolderFiles = [];
@@ -5553,15 +5500,12 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
         window.onload = function() {
             loadPagesFromStorage();
-            gpmPageProfileMappings = loadGpmPageMappings();
-            initGpmBridgeSession();
             loadScheduledQueueFromStorage();
             loadFoldersFromStorage();
             loadPostLibraryFromStorage();
             loadFollowerHistoryFromStorage();
             loadCommentTemplatesFromStorage();
             renderPages();
-            refreshGpmProfiles(false);
             startContinuousAutoSyncTimer();
             updateSyncCycleUI();
             startSchedulerCron();
@@ -5627,271 +5571,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (saved) { try { pagesList = JSON.parse(saved); } catch(e) { pagesList = []; } }
         }
         function savePagesToStorage() { localStorage.setItem('fb_tracked_pages_v12', JSON.stringify(pagesList)); }
-
-        const GPM_BRIDGE_BASE = 'http://127.0.0.1:19996';
-
-        function loadGpmPageMappings() {
-            try {
-                const saved = JSON.parse(localStorage.getItem(GPM_PAGE_MAPPING_KEY) || '{}');
-                return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
-            } catch (error) { return {}; }
-        }
-
-        function saveGpmPageMappings() {
-            localStorage.setItem(GPM_PAGE_MAPPING_KEY, JSON.stringify(gpmPageProfileMappings));
-        }
-
-        function initGpmBridgeSession() {
-            try {
-                gpmBridgeSessionToken = sessionStorage.getItem('gpm_bridge_session_token') || '';
-            } catch (error) {
-                gpmBridgeSessionToken = '';
-            }
-            updateGpmConnectButton();
-        }
-
-        function updateGpmBridgeStatus(message, type = 'info') {
-            const el = document.getElementById('gpm-bridge-status');
-            if (!el) return;
-            const tone = type === 'success' ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                : type === 'error' ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                : type === 'warning' ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-                : 'border-slate-700 bg-slate-950/70 text-slate-300';
-            el.className = `rounded-xl border px-3 py-2 text-[11px] ${tone}`;
-            el.textContent = message;
-        }
-
-        function updateGpmConnectButton() {
-            const button = document.getElementById('gpm-connect-btn');
-            const label = document.getElementById('gpm-connect-label');
-            if (!button || !label) return;
-            label.textContent = gpmConnected ? `GPM: Đã kết nối · ${gpmProfiles.length} Profile`
-                : gpmBridgeSessionToken ? 'GPM: Đang chờ kết nối' : 'GPM: Đang tìm kết nối';
-            button.className = `text-xs font-semibold px-3 py-2 rounded-xl transition border flex items-center gap-2 shadow ${gpmConnected
-                ? 'bg-emerald-950/70 hover:bg-emerald-900/70 text-emerald-300 border-emerald-500/30'
-                : 'bg-slate-800 hover:bg-slate-700 text-cyan-300 border-cyan-500/30'}`;
-        }
-
-        async function gpmBridgeRequest(route, params = {}, renewed = false) {
-            if (!gpmBridgeSessionToken) {
-                const sessionResponse = await fetch(`${GPM_BRIDGE_BASE}/bridge/session`, { cache: 'no-store' });
-                const session = await sessionResponse.json().catch(() => ({}));
-                if (!sessionResponse.ok || !session.token) {
-                    throw new Error(session.message || 'Chưa kết nối được GPM bridge trên máy này. Hãy cài tự khởi động một lần.');
-                }
-                gpmBridgeSessionToken = String(session.token);
-                try { sessionStorage.setItem('gpm_bridge_session_token', gpmBridgeSessionToken); } catch (error) { /* phiên vẫn dùng được trong trang hiện tại */ }
-                updateGpmConnectButton();
-            }
-            const url = new URL(GPM_BRIDGE_BASE + route);
-            Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, String(value)));
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), 15000);
-            try {
-                const response = await fetch(url.toString(), {
-                    method: 'GET',
-                    headers: { 'X-GPM-Bridge-Token': gpmBridgeSessionToken },
-                    signal: controller.signal,
-                    cache: 'no-store'
-                });
-                const payload = await response.json().catch(() => ({}));
-                if (response.status === 401 && !renewed) {
-                    gpmBridgeSessionToken = '';
-                    try { sessionStorage.removeItem('gpm_bridge_session_token'); } catch (error) { /* bỏ qua */ }
-                    return await gpmBridgeRequest(route, params, true);
-                }
-                if (!response.ok || payload.success === false) {
-                    throw new Error(payload.message || `Bridge trả về lỗi HTTP ${response.status}.`);
-                }
-                return payload;
-            } finally { clearTimeout(timeout); }
-        }
-
-        async function refreshGpmProfiles(showMessage = true) {
-            if (!gpmBridgeSessionToken) {
-                gpmConnected = false;
-                updateGpmConnectButton();
-                updateGpmBridgeStatus('Đang tìm GPM bridge chạy nền trên máy này…', 'info');
-            }
-            try {
-                const result = await gpmBridgeRequest('/bridge/gpm/profiles');
-                const profiles = Array.isArray(result.data) ? result.data : [];
-                gpmProfiles = profiles;
-                gpmConnected = true;
-                updateGpmConnectButton();
-                renderGpmProfileOptions();
-                updateGpmBridgeStatus(`Đã kết nối GPM Login · tìm thấy ${profiles.length} Profile.`, 'success');
-                if (showMessage) showToast(`Đã kết nối GPM và tải ${profiles.length} Profile.`, 'success');
-                return true;
-            } catch (error) {
-                gpmConnected = false;
-                updateGpmConnectButton();
-                const message = String(error?.name === 'AbortError' ? 'GPM không phản hồi trong 15 giây.' : error?.message || 'Không kết nối được GPM.');
-                updateGpmBridgeStatus(`${message} Nếu đây là lần đầu, hãy chạy thiết lập tự khởi động một lần.`, 'error');
-                if (showMessage) showToast(message, 'error');
-                return false;
-            }
-        }
-
-        function openGpmProfileManager() {
-            currentGpmPageLocalId = null;
-            document.getElementById('gpm-profile-search').value = '';
-            document.getElementById('gpm-current-page-label').textContent = 'Danh sách Profile GPM hiện có trên máy này.';
-            document.getElementById('gpm-profile-modal').classList.remove('hidden');
-            renderGpmProfileOptions();
-            refreshGpmProfiles(false);
-        }
-
-        function openGpmProfileForPage(pageLocalId) {
-            currentGpmPageLocalId = String(pageLocalId || '');
-            const page = pagesList.find(item => String(item.id) === currentGpmPageLocalId);
-            if (!page) return;
-            document.getElementById('gpm-profile-search').value = '';
-            document.getElementById('gpm-current-page-label').textContent = `Page: ${page.name} (${page.pageId})`;
-            document.getElementById('gpm-profile-modal').classList.remove('hidden');
-            renderGpmProfileOptions();
-            if (gpmPageProfileMappings[currentGpmPageLocalId] && gpmBridgeSessionToken) {
-                openGpmBrowserForPage(currentGpmPageLocalId);
-            } else {
-                refreshGpmProfiles(false);
-            }
-        }
-
-        function closeGpmProfileManager() {
-            document.getElementById('gpm-profile-modal').classList.add('hidden');
-        }
-
-        function renderGpmProfileOptions() {
-            const select = document.getElementById('gpm-profile-select');
-            if (!select) return;
-            const query = String(document.getElementById('gpm-profile-search')?.value || '').trim().toLowerCase();
-            const currentMapping = currentGpmPageLocalId ? String(gpmPageProfileMappings[currentGpmPageLocalId] || '') : '';
-            const filtered = gpmProfiles.filter(profile => `${profile.name || ''} ${profile.id || ''} ${profile.group_name || ''}`.toLowerCase().includes(query));
-            const available = filtered.filter(profile => {
-                const assignedPageId = Object.keys(gpmPageProfileMappings).find(pageId => pageId !== currentGpmPageLocalId && String(gpmPageProfileMappings[pageId]) === String(profile.id));
-                return !assignedPageId || String(profile.id) === currentMapping;
-            });
-            if (!gpmProfiles.length) {
-                select.innerHTML = '<option value="">Kết nối GPM để tải danh sách Profile...</option>';
-            } else if (!available.length) {
-                select.innerHTML = '<option value="">Không có Profile phù hợp hoặc các Profile đã được gắn Page khác.</option>';
-            } else {
-                select.innerHTML = '<option value="">-- Chọn GPM Profile --</option>' + available.map(profile => {
-                    const group = profile.group_name ? ` · ${profile.group_name}` : '';
-                    return `<option value="${escapeHtml(String(profile.id))}">${escapeHtml(profile.name || profile.id)}${escapeHtml(group)}</option>`;
-                }).join('');
-                if (currentMapping && available.some(profile => String(profile.id) === currentMapping)) select.value = currentMapping;
-            }
-            updateGpmProfileSelectionHint();
-        }
-
-        function updateGpmProfileSelectionHint() {
-            const hint = document.getElementById('gpm-profile-selection-hint');
-            const select = document.getElementById('gpm-profile-select');
-            if (!hint || !select) return;
-            const profile = gpmProfiles.find(item => String(item.id) === String(select.value));
-            hint.textContent = profile
-                ? `Đang chọn: ${profile.name || profile.id}${profile.group_name ? ` · Nhóm ${profile.group_name}` : ''}`
-                : 'Mỗi Profile chỉ có thể gắn với một Page trên máy này.';
-        }
-
-        function saveGpmProfileMapping(showMessage = true) {
-            if (!currentGpmPageLocalId) {
-                if (showMessage) showToast('Hãy mở GPM từ một hàng Page để gắn Profile.', 'warning');
-                return false;
-            }
-            const profileId = String(document.getElementById('gpm-profile-select')?.value || '');
-            if (!profileId) {
-                if (showMessage) showToast('Chọn một GPM Profile trước khi gắn.', 'warning');
-                return false;
-            }
-            const alreadyAssigned = Object.entries(gpmPageProfileMappings).find(([pageId, mappedId]) => pageId !== currentGpmPageLocalId && String(mappedId) === profileId);
-            if (alreadyAssigned) {
-                const page = pagesList.find(item => String(item.id) === alreadyAssigned[0]);
-                if (showMessage) showToast(`Profile này đã được gắn với Page “${page?.name || alreadyAssigned[0]}”.`, 'warning');
-                return false;
-            }
-            gpmPageProfileMappings[currentGpmPageLocalId] = profileId;
-            saveGpmPageMappings();
-            renderPages();
-            if (showMessage) showToast('Đã gắn GPM Profile với Page này trên máy hiện tại.', 'success');
-            return true;
-        }
-
-        function clearGpmPageMapping() {
-            if (!currentGpmPageLocalId || !gpmPageProfileMappings[currentGpmPageLocalId]) {
-                showToast('Page này chưa được gắn GPM Profile.', 'info');
-                return;
-            }
-            delete gpmPageProfileMappings[currentGpmPageLocalId];
-            saveGpmPageMappings();
-            renderPages();
-            renderGpmProfileOptions();
-            showToast('Đã gỡ liên kết Profile khỏi Page. Profile GPM vẫn được giữ nguyên.', 'info');
-        }
-
-        async function createGpmProfileForCurrentPage() {
-            const page = pagesList.find(item => String(item.id) === String(currentGpmPageLocalId || ''));
-            if (!page) {
-                showToast('Mở chức năng GPM từ một Page trước khi tạo Profile.', 'warning');
-                return;
-            }
-            const name = `FB-${String(page.pageId || page.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 50)}`;
-            try {
-                const result = await gpmBridgeRequest('/bridge/gpm/create', { name });
-                const profile = result.data;
-                if (!profile?.id) throw new Error('GPM chưa trả về mã Profile mới.');
-                gpmProfiles.unshift(profile);
-                gpmPageProfileMappings[String(page.id)] = String(profile.id);
-                saveGpmPageMappings();
-                renderGpmProfileOptions();
-                document.getElementById('gpm-profile-select').value = String(profile.id);
-                renderPages();
-                updateGpmConnectButton();
-                updateGpmBridgeStatus(`Đã tạo Profile “${profile.name || name}” và gắn với Page ${page.name}.`, 'success');
-                showToast(`Đã tạo và gắn GPM Profile cho Page “${page.name}”.`, 'success');
-            } catch (error) {
-                const message = String(error?.message || 'Không tạo được GPM Profile.');
-                updateGpmBridgeStatus(message, 'error');
-                showToast(message, 'error');
-            }
-        }
-
-        async function saveAndOpenGpmProfile() {
-            if (!saveGpmProfileMapping(false)) {
-                showToast('Chọn một GPM Profile trước khi mở trình duyệt.', 'warning');
-                return;
-            }
-            await openGpmBrowserForPage(currentGpmPageLocalId);
-        }
-
-        async function openGpmBrowserForPage(pageLocalId) {
-            const localId = String(pageLocalId || '');
-            const page = pagesList.find(item => String(item.id) === localId);
-            if (!page) return false;
-            const profileId = String(gpmPageProfileMappings[localId] || '');
-            if (!profileId) {
-                openGpmProfileForPage(localId);
-                return false;
-            }
-            try {
-                const result = await gpmBridgeRequest('/bridge/gpm/start', { profile_id: profileId });
-                if (!result.data?.status) throw new Error(result.data?.message || 'GPM không mở được Profile này.');
-                gpmConnected = true;
-                updateGpmConnectButton();
-                updateGpmBridgeStatus(`Đã mở GPM Profile cho Page ${page.name}. Đăng nhập Facebook trong cửa sổ GPM nếu cần.`, 'success');
-                closeGpmProfileManager();
-                showToast(`Đã mở trình duyệt riêng cho Page “${page.name}”.`, 'success');
-                return true;
-            } catch (error) {
-                gpmConnected = false;
-                updateGpmConnectButton();
-                const message = String(error?.message || 'Không mở được GPM Profile.');
-                updateGpmBridgeStatus(message, 'error');
-                showToast(message, 'error');
-                return false;
-            }
-        }
 
         function getAvatarChangeStatus(page) {
             const status = String(page?.avatarChangeStatus || '');
@@ -8388,11 +8067,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
             tbody.innerHTML = filtered.map((p) => {
                 const changes = calculateFollowerChanges(p.id);
-                const gpmProfileId = String(gpmPageProfileMappings[String(p.id)] || '');
-                const gpmProfile = gpmProfiles.find(profile => String(profile.id) === gpmProfileId);
-                const gpmProfileTag = gpmProfileId
-                    ? `<span title="${escapeHtml(gpmProfile?.name || gpmProfileId)}" class="text-[9px] text-cyan-300 truncate block mt-0.5">GPM: ${escapeHtml(gpmProfile?.name || gpmProfileId)}</span>`
-                    : '';
                 let selectedChange = changes.dayChange;
                 let periodTag = '24h';
                 if (periodVal === 'week') { selectedChange = changes.weekChange; periodTag = '7 Ngày'; }
@@ -8430,7 +8104,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                     <a href="https://facebook.com/${p.pageId}" target="_blank" class="font-bold text-white text-xs hover:text-blue-400 transition truncate block">${escapeHtml(p.name)}</a>
                                     <span class="text-[10px] text-slate-500 font-mono">ID: ${p.pageId}</span>
                                     <span class="text-[9px] text-indigo-300 truncate block mt-0.5">Lô: ${escapeHtml(p.importBatchName || 'Page chưa phân lô')}</span>
-                                    ${gpmProfileTag}
                                 </div>
                             </div>
                         </td>
@@ -8460,7 +8133,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         </td>
                         <td class="px-5 py-3.5 text-right">
                             <div class="flex items-center justify-end gap-1.5">
-                                <button onclick="openGpmProfileForPage('${p.id}')" class="p-1.5 bg-slate-800 hover:bg-cyan-600/80 text-cyan-300 rounded-lg transition" title="Gắn hoặc mở GPM Profile riêng cho Page này"><i class="fa-solid fa-window-restore text-xs"></i></button>
                                 <button onclick="openFetchPostsModal('${p.id}')" class="p-1.5 bg-slate-800 hover:bg-emerald-600/80 text-emerald-300 rounded-lg transition" title="Tải bài viết Page này"><i class="fa-solid fa-cloud-arrow-down text-xs"></i></button>
                                 <button onclick="openFollowerAnalyticsModal('${p.id}')" class="p-1.5 bg-slate-800 hover:bg-blue-600/80 text-blue-300 rounded-lg transition" title="Xem biểu đồ Analytics"><i class="fa-solid fa-chart-line text-xs"></i></button>
                                 <button onclick="deletePage('${p.id}')" class="p-1.5 bg-slate-800 hover:bg-red-600/80 text-red-300 rounded-lg transition" title="Xóa Fanpage"><i class="fa-solid fa-trash-can text-xs"></i></button>
