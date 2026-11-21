@@ -1435,6 +1435,13 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     <span id="page-count-badge" class="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20">0 Page</span>
                 </div>
 
+                <div class="flex flex-wrap items-center gap-2 rounded-xl border border-blue-500/20 bg-slate-950 px-2.5 py-2" title="Chọn nhanh các Page đầu tiên theo thứ tự đang hiển thị sau khi lọc và sắp xếp">
+                    <label for="page-select-count" class="text-[10px] font-bold text-blue-200">Chọn nhanh số lượng:</label>
+                    <input id="page-select-count" type="number" min="1" value="1" aria-label="Số lượng Page muốn chọn" class="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs font-bold text-blue-100 focus:outline-none focus:border-blue-400">
+                    <button type="button" onclick="selectVisiblePagesByCount()" class="bg-blue-700 hover:bg-blue-600 text-white text-[10px] font-bold px-3 py-1.5 rounded-lg transition">Chọn Page</button>
+                    <button type="button" onclick="clearPageSelection()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] font-semibold px-2.5 py-1.5 rounded-lg transition">Bỏ chọn</button>
+                </div>
+
                 <div id="bulk-delete-bar" class="hidden flex-wrap items-center gap-2.5 bg-slate-950 border border-indigo-500/30 px-3 py-2 rounded-xl animate-fade-in max-w-full">
                     <div class="flex items-center gap-1.5 text-xs font-bold text-red-300">
                         <i class="fa-solid fa-square-check text-red-400"></i>
@@ -5256,6 +5263,28 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         function toggleSelectAllPages(master) {
             document.querySelectorAll('.page-row-checkbox').forEach(cb => cb.checked = master.checked);
             updatePageSelectionState();
+        }
+
+        function selectVisiblePagesByCount() {
+            const boxes = [...document.querySelectorAll('#pages-table-body .page-row-checkbox')];
+            if (!boxes.length) {
+                showToast('Không có Page nào trong danh sách đang hiển thị để chọn.', 'warning');
+                return;
+            }
+
+            const input = document.getElementById('page-select-count');
+            const requestedCount = Math.max(1, Number.parseInt(input?.value, 10) || 1);
+            const selectedCount = Math.min(requestedCount, boxes.length);
+            boxes.forEach((box, index) => { box.checked = index < selectedCount; });
+            if (input) input.value = String(selectedCount);
+            updatePageSelectionState();
+            showToast(`Đã chọn ${selectedCount} Page theo danh sách đang hiển thị.`, selectedCount < requestedCount ? 'warning' : 'success');
+        }
+
+        function clearPageSelection() {
+            document.querySelectorAll('#pages-table-body .page-row-checkbox').forEach(box => { box.checked = false; });
+            updatePageSelectionState();
+            showToast('Đã bỏ chọn các Page trong danh sách đang hiển thị.', 'info');
         }
 
         function populateBulkPageBatchTargets() {
