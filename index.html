@@ -2364,11 +2364,24 @@ EAAG..."
             </div>
 
             <div id="import-tab-manual" class="space-y-4 text-xs hidden">
-                <p class="text-xs text-slate-400">Định dạng mỗi dòng: <code class="bg-slate-950 px-1.5 py-0.5 rounded text-emerald-300 font-mono">Tên Page | Page ID | Token</code></p>
+                <p class="text-xs text-slate-400">Mỗi dòng theo định dạng <code class="bg-slate-950 px-1.5 py-0.5 rounded text-emerald-300 font-mono">Tên Page | Page ID | Token</code>. Có thể tải file Text hoặc Excel; Excel nhận diện các cột Tên Fanpage, Page ID, Page Access Token.</p>
                 <div>
                     <label class="block text-slate-300 font-semibold mb-1">Tên lô Page cho lần import này:</label>
                     <input id="import-manual-batch-name" type="text" maxlength="80" placeholder="Ví dụ: Lô Page cửa hàng miền Bắc" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500">
                     <p class="text-[10px] text-slate-500 mt-1">Các Page được lưu từ lần import này sẽ cùng thuộc lô.</p>
+                </div>
+                <div class="rounded-xl border border-slate-700 bg-slate-950/70 p-3">
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                        <div>
+                            <div class="text-[11px] font-bold text-slate-200"><i class="fa-solid fa-file-arrow-up text-emerald-400 mr-1"></i> Nạp danh sách từ file</div>
+                            <div class="text-[10px] text-slate-500 mt-0.5">Hỗ trợ .TXT, .XLSX, .XLS, .CSV. Excel có thể dùng mẫu Backup Fanpages đã xuất từ ứng dụng.</div>
+                        </div>
+                        <button type="button" onclick="document.getElementById('import-pages-file-input').click()" class="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-emerald-300 font-semibold px-3 py-2 rounded-lg transition text-[11px] flex items-center gap-2">
+                            <i class="fa-solid fa-folder-open"></i> Chọn file
+                        </button>
+                        <input id="import-pages-file-input" type="file" accept=".txt,.xlsx,.xls,.csv,text/plain,text/csv" onchange="handleImportPagesFile(event)" class="hidden">
+                    </div>
+                    <div id="import-pages-file-status" aria-live="polite" class="text-[10px] text-slate-500 mt-2">Chưa chọn file. Nội dung file sẽ được nạp vào ô bên dưới để xem lại trước khi import.</div>
                 </div>
                 <textarea id="import-pages-data" rows="7"
                     placeholder="Page Thời Trang | 100000000000001 | EAAB...
@@ -8570,6 +8583,125 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             renderPages();
             showToast(`Đã lưu ${added} Fanpage mới vào hệ thống!`, 'success');
             fetchAllPages(true);
+        }
+
+        function normalizePageImportHeader(value) {
+            return String(value ?? '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/[^a-z0-9]+/g, ' ').trim();
+        }
+
+        function splitPageImportLine(line) {
+            if (line.includes('|')) return line.split('|');
+            if (line.includes('\t')) return line.split('\t');
+            const delimiter = line.includes(';') ? ';' : ',';
+            const fields = [];
+            let field = '';
+            let quoted = false;
+            for (let i = 0; i < line.length; i++) {
+                const ch = line[i];
+                if (ch === '"') {
+                    if (quoted && line[i + 1] === '"') { field += '"'; i++; }
+                    else quoted = !quoted;
+                } else if (ch === delimiter && !quoted) {
+                    fields.push(field.trim());
+                    field = '';
+                } else {
+                    field += ch;
+                }
+            }
+            fields.push(field.trim());
+            return fields;
+        }
+
+        function parseManualPageRows(raw) {
+            const nameHeaders = new Set(['ten fanpage', 'ten page', 'page name', 'fanpage name', 'name', 'fanpage']);
+            const idHeaders = new Set(['page id', 'id page', 'facebook page id', 'id fanpage', 'id']);
+            const tokenHeaders = new Set(['page access token', 'access token', 'page token', 'token']);
+            return String(raw || '').replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(line => {
+                const parts = splitPageImportLine(line).map(value => String(value ?? '').trim());
+                if (parts.length < 3) return null;
+                const headers = parts.map(normalizePageImportHeader);
+                if (headers.some(value => nameHeaders.has(value)) && headers.some(value => idHeaders.has(value)) && headers.some(value => tokenHeaders.has(value))) return null;
+                const [name, pageId, token] = parts;
+                return name && pageId && token ? { name, pageId, token } : null;
+            }).filter(Boolean);
+        }
+
+        function getPageImportColumns(headerRow) {
+            const normalized = headerRow.map(normalizePageImportHeader);
+            const find = aliases => normalized.findIndex(value => aliases.includes(value));
+            return {
+                name: find(['ten fanpage', 'ten page', 'page name', 'fanpage name', 'name', 'fanpage']),
+                pageId: find(['page id', 'id page', 'facebook page id', 'id fanpage', 'id']),
+                token: find(['page access token', 'access token', 'page token', 'token'])
+            };
+        }
+
+        function extractPageRowsFromWorkbook(workbook) {
+            const imported = [];
+            (workbook.SheetNames || []).forEach(sheetName => {
+                const sheet = workbook.Sheets[sheetName];
+                if (!sheet) return;
+                const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+                if (!grid.length) return;
+                let headerIndex = -1;
+                let columns = null;
+                for (let i = 0; i < Math.min(grid.length, 20); i++) {
+                    const candidate = getPageImportColumns(grid[i].map(value => String(value ?? '')));
+                    if (candidate.pageId >= 0 && candidate.token >= 0) {
+                        headerIndex = i;
+                        columns = candidate;
+                        break;
+                    }
+                }
+                if (headerIndex < 0) columns = { name: 0, pageId: 1, token: 2 };
+                const startIndex = headerIndex >= 0 ? headerIndex + 1 : 0;
+                for (let i = startIndex; i < grid.length; i++) {
+                    const row = grid[i] || [];
+                    const name = String(row[columns.name >= 0 ? columns.name : 0] ?? '').trim();
+                    const pageId = String(row[columns.pageId] ?? '').trim();
+                    const token = String(row[columns.token] ?? '').trim();
+                    if (name && pageId && token) imported.push({ name, pageId, token });
+                }
+            });
+            return imported;
+        }
+
+        function setImportPageFileStatus(message, isError = false) {
+            const status = document.getElementById('import-pages-file-status');
+            if (!status) return;
+            status.textContent = message;
+            status.className = 'text-[10px] mt-2 ' + (isError ? 'text-red-300' : 'text-emerald-300');
+        }
+
+        async function handleImportPagesFile(event) {
+            const file = event.target.files && event.target.files[0];
+            if (!file) return;
+            const input = document.getElementById('import-pages-data');
+            const extension = (file.name.match(/\.[^.]+$/) || [''])[0].toLowerCase();
+            setImportPageFileStatus('Đang đọc ' + file.name + '...');
+            try {
+                let rows = [];
+                if (extension === '.txt') {
+                    const text = (await file.text()).replace(/^\uFEFF/, '');
+                    rows = parseManualPageRows(text);
+                } else if (['.xlsx', '.xls', '.csv'].includes(extension)) {
+                    if (!window.XLSX) throw new Error('Thư viện đọc Excel chưa tải xong. Vui lòng thử lại sau.');
+                    const buffer = await file.arrayBuffer();
+                    const workbook = XLSX.read(buffer, { type: 'array', raw: false });
+                    rows = extractPageRowsFromWorkbook(workbook);
+                } else {
+                    throw new Error('Định dạng file chưa được hỗ trợ. Hãy chọn .TXT, .XLSX, .XLS hoặc .CSV.');
+                }
+                input.value = rows.map(row => row.name + ' | ' + row.pageId + ' | ' + row.token).join('\n');
+                setImportPageFileStatus('Đã nạp ' + file.name + ': nhận diện ' + rows.length + ' dòng hợp lệ. Hãy kiểm tra nội dung rồi bấm “Thực Hiện Import Manual”.');
+                if (!rows.length) showToast('Chưa tìm thấy dòng hợp lệ. Kiểm tra định dạng Tên Page | Page ID | Token hoặc các cột Excel.', 'warning');
+            } catch (error) {
+                console.error('Lỗi đọc file import Fanpage:', error);
+                setImportPageFileStatus(error.message || 'Không đọc được file.', true);
+                showToast(error.message || 'Không đọc được file import.', 'error');
+            } finally {
+                event.target.value = '';
+            }
         }
 
         function importPages() {
