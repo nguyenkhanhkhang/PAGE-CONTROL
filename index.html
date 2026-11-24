@@ -1375,7 +1375,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         <div class="glass-panel rounded-2xl p-4 mb-5 flex flex-col xl:flex-row gap-4 justify-between items-center shadow-lg">
             <div class="relative w-full xl:w-96">
                 <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs"></i>
-                <input id="page-search" oninput="renderPages()" type="text" placeholder="Tìm Fanpage theo Tên hoặc ID..."
+                <input id="page-search" oninput="schedulePageRender()" type="text" placeholder="Tìm Fanpage theo Tên hoặc ID..."
                     class="w-full bg-slate-950/90 border border-slate-800 rounded-xl pl-9 pr-3.5 py-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition">
             </div>
             <div class="flex flex-wrap gap-2.5 w-full xl:w-auto justify-end items-center">
@@ -4791,7 +4791,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             updateSyncCycleUI();
         }
 
-        function recordFollowerSnapshot(pageId, count, likesObj = null) {
+        function recordFollowerSnapshot(pageId, count, likesObj = null, persist = true) {
             if (!followerHistoryLogs[pageId]) followerHistoryLogs[pageId] = [];
             const now = Date.now();
             const last = followerHistoryLogs[pageId][followerHistoryLogs[pageId].length - 1];
@@ -4809,8 +4809,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     likesMonth: Number(monthLikes) || 0
                 });
                 if (followerHistoryLogs[pageId].length > 500) followerHistoryLogs[pageId].shift();
-                saveFollowerHistoryToStorage();
+                if (persist) saveFollowerHistoryToStorage();
+                return true;
             }
+            return false;
         }
 
         function calculateFollowerChanges(pageId) {
@@ -8042,12 +8044,23 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             showToast(`Đã xử lý ${targets.length} Page: ${successCount} thành công, ${failedCount} lỗi.`, failedCount ? (successCount ? 'warning' : 'error') : 'success');
         }
 
+        let pageSearchRenderTimer = null;
+
+        function schedulePageRender() {
+            clearTimeout(pageSearchRenderTimer);
+            pageSearchRenderTimer = setTimeout(() => {
+                pageSearchRenderTimer = null;
+                renderPages();
+            }, 180);
+        }
+
         function renderPages() {
             const tbody = document.getElementById('pages-table-body');
             const emptyState = document.getElementById('empty-state');
             const badge = document.getElementById('page-count-badge');
             populatePageBatchFilter();
             const batchFilter = document.getElementById('page-batch-filter')?.value || 'all';
+            const changesByPageId = new Map();
             
             const searchVal = (document.getElementById('page-search')?.value || '').toLowerCase();
             const periodVal = document.getElementById('follower-period-select')?.value || 'day';
@@ -8066,6 +8079,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 if (avatarChangeFilter !== 'all' && getAvatarChangeStatus(p) !== avatarChangeFilter) return false;
 
                 const changes = calculateFollowerChanges(p.id);
+                changesByPageId.set(p.id, changes);
                 let currentChange = changes.dayChange;
                 if (periodVal === 'week') currentChange = changes.weekChange;
                 if (periodVal === 'month') currentChange = changes.monthChange;
@@ -8079,8 +8093,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             });
 
             filtered.sort((a, b) => {
-                const changesA = calculateFollowerChanges(a.id);
-                const changesB = calculateFollowerChanges(b.id);
+                const changesA = changesByPageId.get(a.id);
+                const changesB = changesByPageId.get(b.id);
                 
                 let changeValA = changesA.dayChange;
                 let changeValB = changesB.dayChange;
@@ -8101,14 +8115,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             if (!filtered.length) {
                 tbody.innerHTML = '';
                 if (emptyState) emptyState.classList.remove('hidden');
-                renderDashboardSummaryCards([]);
+                renderDashboardSummaryCards([], changesByPageId);
                 return;
             }
 
             if (emptyState) emptyState.classList.add('hidden');
 
             tbody.innerHTML = filtered.map((p) => {
-                const changes = calculateFollowerChanges(p.id);
+                const changes = changesByPageId.get(p.id);
                 let selectedChange = changes.dayChange;
                 let periodTag = '24h';
                 if (periodVal === 'week') { selectedChange = changes.weekChange; periodTag = '7 Ngày'; }
@@ -8184,11 +8198,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 `;
             }).join('');
 
-            renderDashboardSummaryCards(filtered);
+            renderDashboardSummaryCards(filtered, changesByPageId);
             updatePageSelectionState();
         }
 
-        function renderDashboardSummaryCards(list) {
+        function renderDashboardSummaryCards(list, changesByPageId) {
             const container = document.getElementById('dashboard-summary');
             if (!container) return;
 
@@ -8198,7 +8212,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             let totalGrowing = 0;
             let totalDeclining = 0;
             list.forEach(p => {
-                const ch = calculateFollowerChanges(p.id).dayChange;
+                const ch = changesByPageId.get(p.id).dayChange;
                 if (ch > 0) totalGrowing++;
                 if (ch < 0) totalDeclining++;
             });
@@ -8263,6 +8277,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             // kỳ kế tiếp thay vì báo động sai cho người dùng.
             let realTokenErrors = 0;
             let transientSkips = 0;
+            let followerHistoryChanged = false;
+            let followerHistoryPending = 0;
 
             for (let page of pagesList) {
                 try {
@@ -8280,7 +8296,15 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     page.lastUpdated = new Date().toLocaleTimeString('vi-VN');
 
                     const likesObj = getPagePostLikesMetrics(page);
-                    recordFollowerSnapshot(page.id, page.currentFollowers, likesObj);
+                    if (recordFollowerSnapshot(page.id, page.currentFollowers, likesObj, false)) {
+                        followerHistoryChanged = true;
+                        followerHistoryPending++;
+                        if (followerHistoryPending >= 50) {
+                            saveFollowerHistoryToStorage();
+                            followerHistoryChanged = false;
+                            followerHistoryPending = 0;
+                        }
+                    }
                 } catch (err) {
                     const classified = err.fbClassified;
 
@@ -8305,6 +8329,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 await new Promise(res => setTimeout(res, 300));
             }
 
+            if (followerHistoryChanged) saveFollowerHistoryToStorage();
             savePagesToStorage();
             renderPages();
 
