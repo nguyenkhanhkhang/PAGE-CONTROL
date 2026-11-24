@@ -7,31 +7,857 @@
     <!-- Tailwind CSS CDN -->
     <!--
   ===== GITHUB SYNC – ĐỒNG BỘ MỖI KHI CÓ THAY ĐỔI (localStorage) =====
-  Đặt GitHub Sync trước script chính ở cuối <body> để tránh chặn lúc trình duyệt dựng giao diện.
+  Dán NGUYÊN khối này 1 lần vào file HTML của app: tốt nhất đặt trong <head>.
   Thiết lập 1 lần trên mỗi máy. Sau đó, mỗi lần bạn thao tác làm dữ liệu thay đổi là app tự đồng bộ, không hỏi gì.
   Mở app là đồng bộ NGAY (kéo dữ liệu mới từ máy khác + đẩy thay đổi chưa lưu), sau đó mỗi thao tác thay đổi tiếp tục tự đồng bộ.
   Thiết lập nhanh máy mới: mở link app kèm  #ghs=TOKEN&owner=TENBAN&repo=app-data  (chỉ cần 1 lần, script tự xóa phần # khỏi thanh địa chỉ).
 -->
+<script>
+(function () {
+    'use strict';
+    if (window.__GHS_LOADED__) return;
+    window.__GHS_LOADED__ = true;
 
+    let LS;
+    try { LS = window.localStorage; void LS.length; }
+    catch (e) { console.warn('GitHub Sync: không truy cập được localStorage'); return; }
 
-    <link rel="preconnect" href="https://cdn.tailwindcss.com">
-    <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-    <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin>
-    <script>
-        window.tailwind = window.tailwind || {};
-        window.tailwind.config = { darkMode:'class', theme:{ extend:{ colors:{ brand:{ 50:'#eff6ff', 500:'#3b82f6', 600:'#2563eb', 700:'#1d4ed8', 900:'#1e3a8a' } } } } };
-    </script>
-    <script src="https://cdn.tailwindcss.com" defer></script>
+    // ====== CÓ THỂ ĐIỀN SẴN (không bắt buộc). Token KHÔNG điền ở đây vì file này nằm trên GitHub Pages công khai ======
+    const PRESET = {
+        owner: '', repo: '', branch: 'main',
+        path: '',          // trống = tự đặt theo địa chỉ trang
+        delayMs: 30000,    // chờ 30 giây kể từ thao tác thay đổi cuối cùng rồi mới đồng bộ
+        pullOnOpen: true,  // true  = mở app/quay lại tab là đồng bộ ngay (mặc định), rồi tiếp tục đồng bộ mỗi khi có thay đổi
+                           // false = chỉ đồng bộ khi có thay đổi (mở app không gọi GitHub)
+        waitMs: 0          // chỉ dùng khi pullOnOpen = true: 0 = app mở ngay; 500-800 = chờ dữ liệu mới trước khi hiện trang
+    };
+    // ==============================================================================================================
+
+    const CFG_KEY = 'ghs_config_v2', META_KEY = 'ghs_meta_v5', BACKUP_KEY = 'ghs_backup_v1';
+    const loadJSON = (k, d) => { try { const v = JSON.parse(LS.getItem(k)); return v && typeof v === 'object' ? v : d; } catch (e) { return d; } };
+
+    function defaultPath() {
+        const slug = (location.hostname + location.pathname).replace(/index\.html?$/i, '')
+            .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 80) || 'app';
+        return 'sync-' + slug + '.json';
+    }
+
+    let cfg = Object.assign({ owner: PRESET.owner, repo: PRESET.repo, branch: PRESET.branch || 'main', path: PRESET.path || defaultPath(), token: '', include: '', exclude: '' }, loadJSON(CFG_KEY, {}));
+    let meta = Object.assign({ sha: null, letag: null, base: null, dirty: false, localChangedAt: 0 }, loadJSON(META_KEY, {}));
+    const saveCfg = () => LS.setItem(CFG_KEY, JSON.stringify(cfg));
+    const saveMeta = () => LS.setItem(META_KEY, JSON.stringify(meta));
+    const configured = () => !!(cfg.owner && cfg.repo && cfg.token);
+
+    // Thiết lập nhanh từ địa chỉ: #ghs=TOKEN&owner=...&repo=...&branch=...
+    (function importFromHash() {
+        try {
+            const p = new URLSearchParams(location.hash.replace(/^#/, ''));
+            if (!p.get('ghs')) return;
+            cfg.token = p.get('ghs');
+            if (p.get('owner')) cfg.owner = p.get('owner');
+            if (p.get('repo')) cfg.repo = p.get('repo');
+            if (p.get('branch')) cfg.branch = p.get('branch');
+            saveCfg();
+            history.replaceState(null, '', location.pathname + location.search);
+        } catch (e) { /* bỏ qua */ }
+    })();
+
+    let syncing = false, again = false, muted = false, changeSeq = 0, lastCheckAt = 0, lastSig = '';
+    let syncBatchDepth = 0, syncBatchChanged = false;
+    let pushTimer = null, retryTimer = null, watchTimer = null;
+    let cur = { state: 'off', msg: '' }, ui = null;
+
+    // ---------- Nhường luồng chính cho app (tránh giật/khựng) ----------
+    const yieldMain = () => new Promise(r => {
+        if (typeof scheduler !== 'undefined' && scheduler.yield) scheduler.yield().then(r); else setTimeout(r, 0);
+    });
+    const whenIdle = (fn, timeout) => { if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: timeout || 2000 }); else setTimeout(fn, 200); };
+
+    // ---------- Phạm vi dữ liệu (mẫu lọc được biên dịch sẵn để kiểm tra nhanh) ----------
+    const lines = s => String(s || '').split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
+    const compile = c => ({ inc: lines(c.include), exc: lines(c.exclude) });
+    let pats = compile(cfg);
+    const match = (key, pat) => pat.charAt(pat.length - 1) === '*' ? key.startsWith(pat.slice(0, -1)) : key === pat;
+    function inScope(key, c) {
+        if (key.indexOf('ghs_') === 0) return false;
+        const p = c ? compile(c) : pats;
+        if (p.exc.length && p.exc.some(x => match(key, x))) return false;
+        if (p.inc.length && !p.inc.some(x => match(key, x))) return false;
+        return true;
+    }
+    function scopedKeys() {
+        const ks = [];
+        for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k !== null && inScope(k)) ks.push(k); }
+        return ks.sort();
+    }
+    function snapshot() { const d = {}; scopedKeys().forEach(k => { d[k] = LS.getItem(k); }); return d; }
+    // Chữ ký rẻ (số key + tổng độ dài) để bắt thay đổi mà app ghi trực tiếp kiểu localStorage.x = ...
+    function sig() {
+        let n = 0, t = 0;
+        for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k !== null && inScope(k)) { n++; t += (LS.getItem(k) || '').length; } }
+        return n + ':' + t;
+    }
+
+    // Băm bằng SHA-1 của trình duyệt (chạy ngoài luồng chính). Không có thì dùng djb2.
+    const subtle = (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) ? window.crypto.subtle : null;
+    function djb(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'd' + h + ':' + s.length; }
+    async function hashStr(s) {
+        if (subtle) {
+            try {
+                const a = new Uint8Array(await subtle.digest('SHA-1', new TextEncoder().encode(s)));
+                let h = 's'; for (let i = 0; i < 8; i++) h += a[i].toString(16).padStart(2, '0');
+                return h + ':' + s.length;
+            } catch (e) { /* rơi xuống djb2 */ }
+        }
+        return djb(s);
+    }
+    const H = async v => (v === null || v === undefined) ? '∅' : hashStr(String(v));
+    async function hashMap(obj) {
+        const ks = Object.keys(obj), hs = await Promise.all(ks.map(k => H(obj[k])));
+        const o = {}; ks.forEach((k, i) => { o[k] = hs[i]; }); return o;
+    }
+
+    // ---------- Tiện ích ----------
+    function toB64(str) {                                      // mã hóa base64 bằng Blob/FileReader (nhanh, không chặn)
+        if (typeof FileReader !== 'undefined' && typeof Blob !== 'undefined') {
+            return new Promise((res, rej) => {
+                const fr = new FileReader();
+                fr.onload = () => res(String(fr.result).split(',')[1] || '');
+                fr.onerror = () => rej(fr.error || new Error('Không mã hóa được dữ liệu'));
+                fr.readAsDataURL(new Blob([str]));
+            });
+        }
+        const bytes = new TextEncoder().encode(str); let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        return Promise.resolve(btoa(bin));
+    }
+    function mkErr(s) {
+        const e = new Error('GitHub ' + s + (s === 401 ? ' (token sai/hết hạn)' : s === 403 ? ' (thiếu quyền Contents hoặc bị giới hạn)' : s === 404 ? ' (không thấy repo/branch, kiểm tra tên và quyền token)' : ''));
+        e.status = s; return e;
+    }
+    const enc = p => p.split('/').map(encodeURIComponent).join('/');
+    const repoUrl = () => 'https://api.github.com/repos/' + encodeURIComponent(cfg.owner) + '/' + encodeURIComponent(cfg.repo);
+    const apiUrl = () => repoUrl() + '/contents/' + enc(cfg.path);
+    const dirPart = () => cfg.path.indexOf('/') < 0 ? '' : cfg.path.slice(0, cfg.path.lastIndexOf('/'));
+    const namePart = () => cfg.path.slice(cfg.path.lastIndexOf('/') + 1);
+    const listUrl = () => repoUrl() + '/contents' + (dirPart() ? '/' + enc(dirPart()) : '') + '?ref=' + encodeURIComponent(cfg.branch);
+    const hdr = extra => Object.assign({ Authorization: 'Bearer ' + cfg.token, Accept: 'application/vnd.github+json' }, extra || {});
+    function reloadOnce() {                                    // chống vòng lặp tải lại
+        try {
+            const t = Number(sessionStorage.getItem('ghs_rl') || 0);
+            if (Date.now() - t < 8000) return false;
+            sessionStorage.setItem('ghs_rl', String(Date.now()));
+        } catch (e) { /* bỏ qua */ }
+        location.reload(); return true;
+    }
+    function silently(fn) { muted = true; try { return fn(); } finally { muted = false; } }
+
+    // ---------- Trạng thái ----------
+    const ST = {
+        off:   ['off',   'GitHub Sync',   'Chưa kết nối.'],
+        ok:    ['ok',    'Đã đồng bộ',    'Dữ liệu đã khớp với GitHub.'],
+        sync:  ['sync',  'Đang đồng bộ…', 'Đang trao đổi dữ liệu với GitHub…'],
+        dirty: ['dirty', 'Chờ lưu…',      'Có thay đổi, sắp tự đồng bộ lên GitHub.'],
+        err:   ['err',   'Lỗi đồng bộ',   'Đồng bộ lỗi.']
+    };
+    function setStatus(state, msg) {
+        if (!configured()) state = 'off';
+        cur = { state: state, msg: msg || ST[state][2] };
+        renderStatus();
+    }
+    function renderStatus() {
+        if (!ui) return;
+        const s = ST[cur.state];
+        ui.dot.className = 'dot ' + s[0];
+        ui.label.textContent = s[1];
+        ui.status.textContent = cur.msg;
+        ui.btn.title = cur.msg;
+    }
+
+    // ---------- GitHub API ----------
+    // Kiểm tra NHẸ: chỉ xem danh sách thư mục chứa file để lấy mã (sha) của file, không tải nội dung.
+    // Có ETag nên nếu không có gì mới GitHub trả 304 (rất nhanh, không tính vào giới hạn API).
+    async function remoteHead(cond) {
+        const useCond = !!(cond && meta.letag && meta.sha);
+        const r = await fetch(listUrl(), { headers: hdr(useCond ? { 'If-None-Match': meta.letag } : {}), cache: 'no-store', priority: 'low' });
+        if (r.status === 304) return { sha: meta.sha, unchanged: true };
+        if (r.status === 404) {
+            const rr = await fetch(repoUrl(), { headers: hdr(), cache: 'no-store' });
+            if (!rr.ok) throw mkErr(rr.status);
+            return { sha: null, unchanged: false };            // repo có, nhưng chưa có thư mục/file dữ liệu
+        }
+        if (!r.ok) throw mkErr(r.status);
+        const etag = r.headers && r.headers.get ? r.headers.get('ETag') : null;
+        const arr = await r.json();
+        const ent = Array.isArray(arr) ? arr.find(x => x.name === namePart() && x.type === 'file') : null;
+        const sha = ent ? ent.sha : null;
+        const unchanged = !!(sha && sha === meta.sha);
+        if (unchanged && etag && etag !== meta.letag) { meta.letag = etag; saveMeta(); }
+        return { sha: sha, unchanged: unchanged };
+    }
+    // Tải nội dung file dạng văn bản thô (không qua base64 nên nhanh hơn nhiều)
+    async function fetchDoc() {
+        const r = await fetch(apiUrl() + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr({ Accept: 'application/vnd.github.raw+json' }), cache: 'no-store' });
+        if (r.status === 404) return null;
+        if (!r.ok) throw mkErr(r.status);
+        const text = await r.text();
+        try { return JSON.parse(text); } catch (e) { throw new Error('File dữ liệu trên GitHub không đúng định dạng JSON'); }
+    }
+
+    // ---------- Kho media dùng chung cho file tải lên từ máy tính ----------
+    const MEDIA_ROOT = 'fcc-media/page-control/';
+    const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
+    let lastMediaRequestAt = 0;
+    const mediaApiUrl = path => repoUrl() + '/contents/' + enc(path);
+    function isSafeMediaPath(path) {
+        if (typeof path !== 'string' || !path.startsWith(MEDIA_ROOT)) return false;
+        return path.split('/').every(part => part && part !== '.' && part !== '..');
+    }
+    async function blobToB64(blob, onProgress) {
+        if (typeof FileReader !== 'undefined') {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                const timeout = setTimeout(() => reader.abort(), 120000);
+                reader.onprogress = event => {
+                    if (event.lengthComputable && typeof onProgress === 'function') {
+                        onProgress(`đang chuẩn bị media ${Math.floor((event.loaded / event.total) * 100)}%`);
+                    }
+                };
+                reader.onload = () => {
+                    clearTimeout(timeout);
+                    const dataUrl = String(reader.result || '');
+                    const comma = dataUrl.indexOf(',');
+                    if (comma < 0) return reject(new Error('Không mã hóa được file media.'));
+                    resolve(dataUrl.slice(comma + 1));
+                };
+                reader.onerror = () => {
+                    clearTimeout(timeout);
+                    reject(reader.error || new Error('Không mã hóa được file media.'));
+                };
+                reader.onabort = () => {
+                    clearTimeout(timeout);
+                    reject(new Error('Đã hết thời gian chuẩn bị file media hoặc thao tác bị hủy.'));
+                };
+                reader.readAsDataURL(blob);
+            });
+        }
+        const bytes = new Uint8Array(await blob.arrayBuffer());
+        let binary = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+        }
+        return btoa(binary);
+    }
+    async function fetchMediaWithTimeout(url, options = {}, timeoutMs = 20000) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
+        } finally {
+            clearTimeout(timeout);
+        }
+    }
+
+    function sendMediaUploadRequest(url, requestBody, onProgress) {
+        return new Promise((resolve, reject) => {
+            const xhr = new XMLHttpRequest();
+            xhr.open('PUT', url, true);
+            xhr.timeout = 600000;
+            xhr.setRequestHeader('Authorization', 'Bearer ' + cfg.token);
+            xhr.setRequestHeader('Accept', 'application/vnd.github+json');
+            xhr.setRequestHeader('Content-Type', 'application/json');
+            let lastProgressAt = 0;
+            let stalled = false;
+            let stallTimer = null;
+            const clearStallTimer = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer = null; };
+            const resetStallTimer = () => {
+                clearStallTimer();
+                stallTimer = setTimeout(() => { stalled = true; xhr.abort(); }, 45000);
+            };
+            xhr.upload.onprogress = event => {
+                resetStallTimer();
+                if (!event.lengthComputable || typeof onProgress !== 'function') return;
+                const percent = Math.floor((event.loaded / event.total) * 100);
+                if (percent === 100 || Date.now() - lastProgressAt >= 300) {
+                    lastProgressAt = Date.now();
+                    onProgress(percent >= 100
+                        ? 'đã gửi media 100%; đang chờ GitHub xác nhận'
+                        : `đang tải media lên GitHub ${percent}%`);
+                }
+            };
+            xhr.onreadystatechange = () => { if (xhr.readyState === 2) resetStallTimer(); };
+            xhr.onload = () => {
+                clearStallTimer();
+                resolve({
+                    status: xhr.status,
+                    ok: xhr.status >= 200 && xhr.status < 300,
+                    headers: { get: name => { try { return xhr.getResponseHeader(name); } catch (e) { return null; } } },
+                    clone: () => ({ json: async () => JSON.parse(xhr.responseText || '{}') })
+                });
+            };
+            xhr.onerror = () => { clearStallTimer(); reject(new Error('Kết nối GitHub bị gián đoạn.')); };
+            xhr.ontimeout = () => { clearStallTimer(); reject(new Error('GitHub không phản hồi trong 10 phút.')); };
+            xhr.onabort = () => {
+                clearStallTimer();
+                reject(new Error(stalled ? 'Không có tiến triển khi tải lên hoặc chờ GitHub xác nhận trong 45 giây.' : 'Đã hủy yêu cầu tải media lên GitHub.'));
+            };
+            resetStallTimer();
+            xhr.send(requestBody);
+        });
+    }
+
+    async function uploadMedia(file, id, onProgress) {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync trước khi lưu file để dùng trên máy khác.');
+        if (!file || typeof file.size !== 'number') throw new Error('File tải lên không hợp lệ.');
+        if (file.size > MEDIA_MAX_BYTES) throw new Error('File vượt quá 50 MiB. Hãy dùng file nhỏ hơn hoặc lưu media ở dịch vụ lưu trữ riêng.');
+
+        const safeId = String(id || '').replace(/[^a-zA-Z0-9_-]/g, '');
+        const safeName = String(file.name || 'media').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+            .replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-100) || 'media';
+        if (!safeId) throw new Error('Không tạo được mã file để lưu lên GitHub.');
+        const path = MEDIA_ROOT + safeId + '-' + safeName;
+        const url = mediaApiUrl(path);
+        const body = {
+            message: 'store uploaded media ' + safeId,
+            content: await blobToB64(file, onProgress),
+            branch: cfg.branch
+        };
+        const requestBody = JSON.stringify(body);
+        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+        const maxAttempts = 4;
+        for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            let r;
+            try {
+                const gap = 800 - (Date.now() - lastMediaRequestAt);
+                if (gap > 0) await delay(gap);
+                lastMediaRequestAt = Date.now();
+                r = await sendMediaUploadRequest(url, requestBody, onProgress);
+            } catch (error) {
+                if (attempt === maxAttempts - 1) {
+                    throw new Error(`Mạng bị gián đoạn khi tải "${file.name || safeName}" lên GitHub: ${error.message || 'hết thời gian chờ'}`);
+                }
+                if (typeof onProgress === 'function') onProgress(`mạng chập chờn; tự thử lại lần ${attempt + 2}/${maxAttempts}`);
+                await delay(Math.min(1000 * Math.pow(2, attempt), 15000));
+                continue;
+            }
+
+            if (r.status === 409 || r.status === 422) {
+                // Một lần thử trước có thể đã ghi file nhưng mất phản hồi mạng.
+                try {
+                    const existing = await fetchMediaWithTimeout(url + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr(), cache: 'no-store' });
+                    if (existing.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+                } catch (error) {
+                    if (attempt === maxAttempts - 1) throw new Error('GitHub đã nhận file nhưng bước xác minh bị treo: ' + (error.message || String(error)));
+                    if (typeof onProgress === 'function') onProgress('đang xác minh file đã tải; tự thử lại...');
+                    await delay(Math.min(1000 * Math.pow(2, attempt), 15000));
+                    continue;
+                }
+            }
+            if (r.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
+
+            let rateLimitMessage = '';
+            if (r.status === 403) {
+                try {
+                    const data = await r.clone().json();
+                    rateLimitMessage = data.message || '';
+                } catch (e) { /* response is not JSON */ }
+            }
+            const secondaryLimit = r.status === 403 && (
+                !!r.headers.get('Retry-After') ||
+                r.headers.get('X-RateLimit-Remaining') === '0' ||
+                /secondary rate limit|abuse detection|rate limit exceeded/i.test(rateLimitMessage)
+            );
+            const retryable = [408, 429, 500, 502, 503, 504].includes(r.status) || secondaryLimit;
+            if (retryable && attempt < maxAttempts - 1) {
+                const retryAfter = Number(r.headers.get('Retry-After') || 0);
+                const resetAt = Number(r.headers.get('X-RateLimit-Reset') || 0);
+                const waitMs = retryAfter > 0
+                    ? Math.min(retryAfter * 1000, 120000)
+                    : (r.headers.get('X-RateLimit-Remaining') === '0' && resetAt > 0
+                        ? Math.min(Math.max(resetAt * 1000 - Date.now(), 1000), 120000)
+                        : (secondaryLimit ? 60000 : Math.min(1000 * Math.pow(2, attempt), 15000)));
+                if (typeof onProgress === 'function') onProgress(`GitHub giới hạn tạm thời; chờ ${Math.ceil(waitMs / 1000)} giây rồi tự thử lại`);
+                await delay(waitMs);
+                continue;
+            }
+            if (secondaryLimit) throw new Error('GitHub đang giới hạn lượt tải media. Hãy đợi rồi thử lại. ' + rateLimitMessage);
+            throw mkErr(r.status);
+        }
+        throw new Error('Không thể tải media lên GitHub sau nhiều lần thử.');
+    }
+    async function downloadMedia(path) {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để tải media từ kho dùng chung.');
+        if (!isSafeMediaPath(path)) throw new Error('Đường dẫn media trên GitHub không hợp lệ.');
+        const r = await fetch(mediaApiUrl(path) + '?ref=' + encodeURIComponent(cfg.branch), {
+            headers: hdr({ Accept: 'application/vnd.github.raw+json' }), cache: 'no-store'
+        });
+        if (r.status === 404) throw new Error('Không tìm thấy file media trên GitHub. Hãy kiểm tra kết nối hoặc đồng bộ lại Kho.');
+        if (!r.ok) throw mkErr(r.status);
+        return r.blob();
+    }
+    async function listMediaFiles() {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để quét media trên GitHub.');
+        const refResponse = await fetch(repoUrl() + '/git/ref/heads/' + enc(cfg.branch), { headers: hdr(), cache: 'no-store' });
+        if (!refResponse.ok) throw mkErr(refResponse.status);
+        const refData = await refResponse.json();
+        const commitSha = refData && refData.object && refData.object.sha;
+        if (!commitSha) throw new Error('Không đọc được mã commit của nhánh GitHub hiện tại.');
+
+        const treeResponse = await fetch(repoUrl() + '/git/trees/' + encodeURIComponent(commitSha) + '?recursive=1', { headers: hdr(), cache: 'no-store' });
+        if (!treeResponse.ok) throw mkErr(treeResponse.status);
+        const treeData = await treeResponse.json();
+        if (treeData.truncated) throw new Error('Kho GitHub quá lớn để quét an toàn một lượt; chưa xóa dữ liệu nào.');
+        return (treeData.tree || [])
+            .filter(entry => entry.type === 'blob' && isSafeMediaPath(entry.path))
+            .map(entry => ({ path: entry.path, sha: entry.sha, size: entry.size || 0 }));
+    }
+    async function deleteRemoteMedia(path, sha) {
+        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để dọn media trên GitHub.');
+        if (!isSafeMediaPath(path) || !sha) throw new Error('Đường dẫn hoặc mã file GitHub không hợp lệ.');
+        const r = await fetch(mediaApiUrl(path), {
+            method: 'DELETE',
+            headers: hdr({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({ message: 'remove orphan media ' + path.split('/').pop(), sha: sha, branch: cfg.branch })
+        });
+        if (!r.ok) throw mkErr(r.status);
+        return true;
+    }
+    window.__GHS_MEDIA__ = Object.freeze({ isConfigured: configured, upload: uploadMedia, download: downloadMedia, listMediaFiles: listMediaFiles, deleteRemoteMedia: deleteRemoteMedia, beginBatch: beginSyncBatch, endBatch: endSyncBatch, maxBytes: MEDIA_MAX_BYTES });
+
+    // Gộp dữ liệu 3 bên (máy này / GitHub / lần đồng bộ trước). Mỗi key xử lý riêng, không cần hỏi:
+    //  - chỉ 1 bên đổi  -> lấy bên đổi
+    //  - cả 2 bên cùng đổi 1 key -> bên mới hơn thắng
+    //  - máy chưa từng đồng bộ (base = null) -> GitHub ưu tiên, key chỉ có ở máy này vẫn được giữ lại
+    async function mergeData(local, remote, base, remTs, locTs) {
+        const out = {}; let changedLocal = false, needPush = false;
+        const keys = Array.from(new Set(Object.keys(local).concat(Object.keys(remote))));
+        for (let i = 0; i < keys.length; i++) {
+            const k = keys[i];
+            const l = (k in local) ? local[k] : null, r = (k in remote) ? remote[k] : null;
+            if (l === r) { if (l !== null) out[k] = l; continue; }
+            let pick;
+            if (!base) pick = (r !== null) ? 'r' : 'l';
+            else {
+                const b = (k in base) ? base[k] : '∅';
+                const hs = await Promise.all([H(l), H(r)]);
+                const lc = hs[0] !== b, rc = hs[1] !== b;
+                if (lc && !rc) pick = 'l';
+                else if (rc && !lc) pick = 'r';
+                else if (lc && rc) pick = (locTs > remTs) ? 'l' : 'r';
+                else pick = 'r';
+            }
+            const v = pick === 'l' ? l : r;
+            if (v !== null) out[k] = v;
+            if (pick === 'r') changedLocal = true; else needPush = true;
+        }
+        return { out: out, changedLocal: changedLocal, needPush: needPush };
+    }
+
+    function setLocal(out) {
+        const writeSnapshot = () => silently(() => {
+            // Free keys removed by the incoming snapshot before writing replacements. This matters
+            // on phones, where writing first and deleting stale values afterward can exceed quota.
+            scopedKeys().forEach(k => { if (!(k in out)) LS.removeItem(k); });
+            Object.keys(out).forEach(k => { if (LS.getItem(k) !== out[k]) LS.setItem(k, out[k]); });
+        });
+        try {
+            writeSnapshot();
+        } catch (error) {
+            const quotaExceeded = error && (
+                error.name === 'QuotaExceededError' || error.code === 22 || error.code === 1014 ||
+                /quota|storage.*full/i.test(error.message || '')
+            );
+            if (!quotaExceeded) throw error;
+
+            // The GitHub copy is the recovery source; release the duplicate local restore snapshot,
+            // then retry the same incoming state once.
+            try { silently(() => LS.removeItem(BACKUP_KEY)); } catch (cleanupError) { /* best effort */ }
+            try {
+                writeSnapshot();
+            } catch (retryError) {
+                const storageError = new Error('Dung lượng trình duyệt trên thiết bị đã đầy. Đã thử bỏ bản sao lưu cục bộ nhưng vẫn không đủ chỗ để nhận dữ liệu GitHub. Hãy giải phóng dung lượng của Kho trên thiết bị rồi đồng bộ lại.');
+                storageError.name = 'QuotaExceededError';
+                throw storageError;
+            }
+        }
+    }
+    function backupLocal(data) {
+        try {
+            const serialized = JSON.stringify({ at: Date.now(), data: data });
+            // Large full snapshots duplicate the entire app state and frequently fill mobile storage.
+            // GitHub keeps the authoritative copy, so retain only small local restore points.
+            if (serialized.length > 262144) { silently(() => LS.removeItem(BACKUP_KEY)); return; }
+            silently(() => LS.setItem(BACKUP_KEY, serialized));
+        } catch (e) { /* hết dung lượng thì bỏ qua */ }
+    }
+
+    // Một vòng đồng bộ 2 chiều. Trả về { reload } nếu dữ liệu máy này vừa được cập nhật từ GitHub.
+    async function syncOnce(attempt) {
+        const seq0 = changeSeq;
+        const quick = !meta.dirty && attempt === 0 && !!meta.base;          // không có gì chờ lưu: chỉ kiểm tra nhẹ
+        const head = await remoteHead(quick);
+        if (head.unchanged && !meta.dirty) { lastCheckAt = Date.now(); return { reload: false }; }   // GitHub không có gì mới
+
+        await yieldMain();
+        const sig0 = sig();
+        const localData = snapshot();
+        let m, nb = null, extra = {};
+
+        if (head.unchanged && meta.base && meta.extra) {
+            // GitHub chưa đổi từ lần đồng bộ trước -> mọi khác biệt đều do máy này, khỏi tải file về
+            extra = meta.extra;
+            nb = await hashMap(localData);
+            let diff = false;
+            new Set(Object.keys(nb).concat(Object.keys(meta.base))).forEach(k => { if ((nb[k] || '∅') !== (meta.base[k] || '∅')) diff = true; });
+            m = { out: localData, changedLocal: false, needPush: diff };
+        } else {
+            const doc = head.sha ? await fetchDoc() : null;
+            const remAll = (doc && doc.data) || {};
+            const remData = {};
+            Object.keys(remAll).forEach(k => {
+                if (inScope(k)) remData[k] = typeof remAll[k] === 'string' ? remAll[k] : JSON.stringify(remAll[k]);
+                else extra[k] = remAll[k];
+            });
+            await yieldMain();
+            m = await mergeData(localData, remData, meta.base, (doc && Number(doc.updatedAt)) || 0, meta.localChangedAt || 0);
+        }
+
+        let reload = false;
+        if (m.changedLocal) { backupLocal(localData); setLocal(m.out); reload = true; }
+
+        let newSha = head.sha;
+        if (m.needPush) {
+            await yieldMain();
+            const text = JSON.stringify({ app: 'github-sync', updatedAt: Date.now(), origin: location.origin, data: Object.assign({}, extra, m.out) });
+            const body = { message: 'sync ' + new Date().toISOString(), content: await toB64(text), branch: cfg.branch };
+            if (head.sha) body.sha = head.sha;
+            const r = await fetch(apiUrl(), { method: 'PUT', headers: hdr({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
+            if (r.status === 409 || r.status === 422) {                   // máy khác vừa ghi: gộp lại với bản mới nhất
+                if (attempt < 3) { const res2 = await syncOnce(attempt + 1); res2.reload = res2.reload || reload; return res2; }
+                throw mkErr(r.status);
+            }
+            if (!r.ok) throw mkErr(r.status);
+            newSha = (await r.json()).content.sha;
+            meta.letag = null;                                            // lần kiểm tra sau sẽ lấy ETag mới
+        } else if (head.sha !== meta.sha) meta.letag = null;
+
+        if (!nb || m.changedLocal) nb = await hashMap(m.out);
+        meta.sha = newSha; meta.base = nb;
+        if (JSON.stringify(extra).length < 200000) meta.extra = extra; else delete meta.extra;
+        meta.dirty = (changeSeq !== seq0);                                // có thay đổi mới trong lúc đồng bộ -> chạy thêm vòng nữa
+        saveMeta();
+        lastSig = m.changedLocal ? sig() : sig0;
+        lastCheckAt = Date.now();
+        if (meta.dirty) again = true;
+        return { reload: reload };
+    }
+
+    async function runSync() {
+        if (!configured()) return { reload: false };
+        if (syncing) { again = true; return { reload: false }; }
+        syncing = true; clearTimeout(retryTimer); setStatus('sync');
+        const res = { reload: false };
+        try {
+            let loops = 0;
+            do { again = false; const r = await syncOnce(0); if (r.reload) res.reload = true; } while (again && ++loops < 5);
+            setStatus('ok', 'Đã đồng bộ lúc ' + new Date().toLocaleTimeString());
+        } catch (e) {
+            setStatus('err', 'Lỗi: ' + e.message);
+            if (!e.status || e.status >= 500) retryTimer = setTimeout(autoSync, 30000);   // lỗi mạng: tự thử lại
+        } finally { syncing = false; }
+        return res;
+    }
+    function autoSync() { runSync().then(r => { if (r.reload) reloadOnce(); }); }
+
+    function beginSyncBatch() {
+        if (!syncBatchDepth) {
+            clearTimeout(pushTimer);
+            if (meta.dirty) syncBatchChanged = true;
+        }
+        syncBatchDepth++;
+    }
+    function endSyncBatch() {
+        if (!syncBatchDepth) return;
+        syncBatchDepth--;
+        if (!syncBatchDepth && syncBatchChanged) {
+            syncBatchChanged = false;
+            noteChange();
+        }
+    }
+
+    // Gọi ngay khi app ghi/xóa dữ liệu. Chờ yên delayMs rồi đồng bộ (vào lúc trình duyệt rảnh, nên không giật khi đang dùng app).
+    function noteChange() {
+        if (!configured()) return;
+        changeSeq++;
+        const was = meta.dirty;
+        meta.dirty = true; meta.localChangedAt = Date.now();
+        if (!was) saveMeta();
+        clearTimeout(pushTimer);
+        pushTimer = setTimeout(() => { saveMeta(); whenIdle(autoSync, 1500); }, PRESET.delayMs >= 0 ? PRESET.delayMs : 1000);
+        if (!syncing && cur.state !== 'dirty') setStatus('dirty');
+    }
+
+    // "Móc" vào localStorage để biết đúng lúc app lưu dữ liệu (không cần quét định kỳ)
+    let hooked = false;
+    try {
+        const P = Storage.prototype, oSet = P.setItem, oRm = P.removeItem, oClr = P.clear;
+        P.setItem = function (k, v) {
+            if (this === LS && !muted) {
+                const key = String(k);
+                if (inScope(key)) {
+                    const old = this.getItem(key);
+                    oSet.apply(this, arguments);
+                    if (old !== String(v)) {
+                        if (syncBatchDepth) syncBatchChanged = true;
+                        else noteChange();
+                    }
+                    return;
+                }
+            }
+            return oSet.apply(this, arguments);
+        };
+        P.removeItem = function (k) {
+            if (this === LS && !muted) {
+                const key = String(k);
+                if (inScope(key) && this.getItem(key) !== null) {
+                    oRm.apply(this, arguments);
+                    if (syncBatchDepth) syncBatchChanged = true;
+                    else noteChange();
+                    return;
+                }
+            }
+            return oRm.apply(this, arguments);
+        };
+        P.clear = function () {
+            const had = this === LS && !muted && scopedKeys().length > 0;
+            const r = oClr.apply(this, arguments);
+            if (had) {
+                if (syncBatchDepth) syncBatchChanged = true;
+                else noteChange();
+            }
+            return r;
+        };
+        hooked = true;
+    } catch (e) { hooked = false; }
+
+    // Phòng hờ (app ghi kiểu localStorage.x = ...): kiểm tra chữ ký rẻ, thưa, và bỏ qua khi tab đang ẩn
+    function startWatching() {
+        if (watchTimer) return;
+        lastSig = sig();
+        watchTimer = setInterval(() => {
+            if (syncing || syncBatchDepth || !configured() || document.visibilityState === 'hidden') return;
+            const s = sig();
+            if (s !== lastSig) { lastSig = s; noteChange(); }
+        }, hooked ? 20000 : 3000);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (!configured()) return;
+        if (document.visibilityState === 'hidden') {                      // rời tab/đóng app: lưu ngay
+            const s = sig();
+            if (s !== lastSig) {
+                lastSig = s;
+                if (syncBatchDepth) syncBatchChanged = true;
+                else noteChange();
+            }
+            clearTimeout(pushTimer);
+            if (meta.dirty) { saveMeta(); autoSync(); }
+            return;
+        }
+        if (!PRESET.pullOnOpen) return;                                   // chế độ "chỉ khi có thay đổi": quay lại tab không gọi GitHub
+        if (!meta.dirty && Date.now() - lastCheckAt < 15000) return;      // vừa kiểm tra xong, khỏi gọi lại
+        autoSync();                                                       // quay lại: kéo dữ liệu mới từ máy khác
+    });
+    window.addEventListener('online', () => { if (configured() && meta.dirty) autoSync(); });
+
+    // ---------- Giao diện (Shadow DOM, không đụng CSS của app; dựng khi trình duyệt rảnh) ----------
+    function buildUI() {
+        const host = document.createElement('div');
+        host.id = 'ghs-host';
+        const root = host.attachShadow({ mode: 'open' });
+        root.innerHTML = `
+<style>
+:host{all:initial}
+*{box-sizing:border-box;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.btn{position:fixed;left:14px;bottom:14px;z-index:2147483646;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.35)}
+.btn:hover{border-color:#3b82f6}
+.dot{width:10px;height:10px;border-radius:50%;background:#64748b;flex:none}
+.dot.ok{background:#22c55e}.dot.sync{background:#3b82f6;animation:p 1s infinite}.dot.dirty{background:#f59e0b}.dot.err{background:#ef4444}
+@keyframes p{50%{opacity:.35}}
+.ov{position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.78);display:none;align-items:center;justify-content:center;padding:16px}
+.ov.open{display:flex}
+.box{width:100%;max-width:450px;max-height:92vh;overflow:auto;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:16px;padding:18px;font-size:12px;line-height:1.45}
+.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:14px}
+.x{background:none;border:0;color:#94a3b8;font-size:16px;cursor:pointer}
+.st{margin:0 0 10px;color:#94a3b8}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+label{display:block;margin-bottom:8px;color:#cbd5e1}
+input,textarea{display:block;width:100%;margin-top:4px;padding:8px 10px;border-radius:8px;background:#020617;color:#f1f5f9;border:1px solid #334155;font-size:12px;outline:none}
+input:focus,textarea:focus{border-color:#3b82f6}
+textarea{resize:vertical}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
+button.b{padding:9px;border-radius:8px;border:0;background:#1e293b;color:#e2e8f0;font-weight:700;font-size:12px;cursor:pointer}
+button.b:hover{background:#334155}
+button.p{background:#2563eb;color:#fff;grid-column:1/-1}button.p:hover{background:#1d4ed8}
+button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
+.keys{margin:8px 0 0;padding:8px;border-radius:8px;background:#020617;border:1px solid #334155;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#cbd5e1}
+.note{margin:10px 0 0;color:#64748b;font-size:11px}
+</style>
+<button class="btn" id="btn" type="button"><span class="dot" id="dot"></span><span>☁</span><span id="label">GitHub Sync</span></button>
+<div class="ov" id="ov"><div class="box">
+  <div class="hd"><b>☁ Đồng bộ dữ liệu qua GitHub</b><button class="x" id="close" type="button">✕</button></div>
+  <p class="st" id="status"></p>
+  <div class="g2">
+    <label>Tài khoản GitHub<input id="owner" placeholder="vd: tenban" autocomplete="off"></label>
+    <label>Repo dữ liệu (private)<input id="repo" placeholder="vd: app-data" autocomplete="off"></label>
+    <label>Branch<input id="branch" placeholder="main" autocomplete="off"></label>
+    <label>Tên file lưu<input id="path" autocomplete="off"></label>
+  </div>
+  <label>GitHub Token (fine-grained, quyền Contents: Read and write)<input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></label>
+  <label>Chỉ đồng bộ các key này (mỗi dòng 1 key, dùng * cho tiền tố; để trống = tất cả)<textarea id="include" rows="2" placeholder="vd: myapp_*"></textarea></label>
+  <label>Không đồng bộ các key này (vd: key chứa mật khẩu/token, hoặc key đổi liên tục)<textarea id="exclude" rows="2" placeholder="vd: theme"></textarea></label>
+  <div class="row">
+    <button class="b p" id="connect" type="button">Lưu &amp; kết nối</button>
+    <button class="b" id="syncnow" type="button">⟳ Đồng bộ ngay</button>
+    <button class="b" id="showkeys" type="button">Xem key đồng bộ</button>
+    <button class="b" id="pull" type="button">⬇ Ép tải từ GitHub</button>
+    <button class="b" id="restore" type="button">↩ Khôi phục bản sao lưu</button>
+    <button class="b d" id="off" type="button">Ngắt kết nối máy này</button>
+  </div>
+  <pre class="keys" id="keys" style="display:none"></pre>
+  <p class="note">Sau khi kết nối, app tự đồng bộ dữ liệu Kho mỗi khi bạn thao tác và khi mở app. File tải lên từ máy được lưu riêng trong thư mục fcc-media/page-control của repo, còn nội dung bài và thông tin file được đồng bộ qua localStorage. Nếu giới hạn key đồng bộ, hãy gồm fb_post_library_v12. Dùng repo private và cùng cấu hình GitHub Sync trên mọi máy. File tối đa 50 MiB; tệp lớn hơn nên dùng dịch vụ lưu trữ media riêng. GitHub lưu lịch sử các phiên bản file trong repo.</p>
+</div></div>`;
+        (document.body || document.documentElement).appendChild(host);
+        const $ = id => root.getElementById(id);
+        ui = { btn: $('btn'), dot: $('dot'), label: $('label'), status: $('status') };
+        renderStatus();
+
+        const fill = () => {
+            $('owner').value = cfg.owner; $('repo').value = cfg.repo; $('branch').value = cfg.branch;
+            $('path').value = cfg.path; $('token').value = cfg.token; $('include').value = cfg.include; $('exclude').value = cfg.exclude;
+            $('keys').style.display = 'none';
+        };
+        const readForm = () => ({
+            owner: $('owner').value.trim(), repo: $('repo').value.trim(), branch: $('branch').value.trim() || 'main',
+            path: $('path').value.trim() || defaultPath(), token: $('token').value.trim(),
+            include: $('include').value, exclude: $('exclude').value
+        });
+        const close = () => $('ov').classList.remove('open');
+        ui.btn.onclick = () => { fill(); $('ov').classList.add('open'); };
+        $('close').onclick = close;
+        $('ov').addEventListener('click', e => { if (e.target === $('ov')) close(); });
+
+        $('showkeys').onclick = () => {
+            const c = readForm(), out = [];
+            for (let i = 0; i < LS.length; i++) {
+                const k = LS.key(i); if (k === null || k.indexOf('ghs_') === 0) continue;
+                out.push((inScope(k, c) ? '✓ ' : '✗ ') + k + '  (' + (LS.getItem(k) || '').length + ' ký tự)');
+            }
+            $('keys').textContent = out.length ? '✓ = sẽ đồng bộ, ✗ = bỏ qua\n' + out.sort().join('\n') : 'Chưa có dữ liệu localStorage nào.';
+            $('keys').style.display = 'block';
+        };
+
+        $('connect').onclick = async () => {
+            const next = readForm();
+            if (!next.owner || !next.repo || !next.token) { setStatus('err', 'Nhập đủ tài khoản, repo và token.'); return; }
+            if (next.owner !== cfg.owner || next.repo !== cfg.repo || next.branch !== cfg.branch || next.path !== cfg.path) {
+                meta = { sha: null, letag: null, base: null, dirty: false, localChangedAt: 0 }; saveMeta();
+            }
+            cfg = next; pats = compile(cfg); saveCfg();
+            const res = await runSync();
+            if (cur.state === 'err') return;
+            startWatching(); close();
+            if (res.reload) reloadOnce();
+        };
+        $('syncnow').onclick = () => { if (!configured()) { setStatus('err', 'Chưa kết nối GitHub.'); return; } autoSync(); };
+        $('pull').onclick = async () => {
+            if (!configured()) { setStatus('err', 'Chưa kết nối GitHub.'); return; }
+            if (!confirm('Ghi đè TOÀN BỘ dữ liệu máy này bằng dữ liệu trên GitHub?')) return;
+            try {
+                setStatus('sync');
+                const head = await remoteHead(false);
+                const doc = head.sha ? await fetchDoc() : null;
+                if (!doc) { setStatus('ok', 'Chưa có file dữ liệu trên GitHub.'); return; }
+                backupLocal(snapshot());
+                const out = {};
+                Object.keys(doc.data || {}).forEach(k => { if (inScope(k)) { const v = doc.data[k]; out[k] = typeof v === 'string' ? v : JSON.stringify(v); } });
+                setLocal(out);
+                meta.sha = head.sha; meta.letag = null; meta.base = await hashMap(out); meta.dirty = false; delete meta.extra; saveMeta();
+                reloadOnce();
+            } catch (e) { setStatus('err', 'Lỗi: ' + e.message); }
+        };
+        $('restore').onclick = async () => {
+            const b = loadJSON(BACKUP_KEY, null);
+            if (!b || !b.data) { setStatus('err', 'Chưa có bản sao lưu nào trên máy này.'); return; }
+            if (!confirm('Khôi phục dữ liệu máy này về bản sao lưu lúc ' + new Date(b.at).toLocaleString() + ' và đẩy lên GitHub?')) return;
+            setLocal(b.data);
+            changeSeq++; meta.dirty = true; meta.localChangedAt = Date.now(); saveMeta();
+            await runSync();
+            if (cur.state !== 'err') reloadOnce();
+        };
+        $('off').onclick = () => {
+            if (!confirm('Ngắt kết nối GitHub trên máy này? (Dữ liệu trong app vẫn giữ nguyên)')) return;
+            silently(() => { LS.removeItem(CFG_KEY); LS.removeItem(META_KEY); });
+            clearInterval(watchTimer); watchTimer = null; clearTimeout(pushTimer); clearTimeout(retryTimer);
+            cfg = Object.assign({}, cfg, { token: '' }); meta = { sha: null, letag: null, base: null, dirty: false, localChangedAt: 0 };
+            fill(); setStatus('off');
+        };
+    }
+    const startUI = () => whenIdle(buildUI, 3000);
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startUI); else startUI();
+
+    // ---------- Khởi động ----------
+    function boot() {
+        if (!configured()) return;
+        // Chỉ đồng bộ ngay khi mở app nếu: (1) có thay đổi chưa kịp lưu từ lần trước, (2) máy chưa từng đồng bộ, hoặc (3) bạn bật pullOnOpen.
+        const needNow = PRESET.pullOnOpen || meta.dirty || !meta.base;
+        if (!needNow) {
+            setStatus('ok', 'Tự đồng bộ mỗi khi có thay đổi. Bấm "Đồng bộ ngay" để kéo dữ liệu mới từ máy khác.');
+            startWatching();
+            return;
+        }
+        const de = document.documentElement;
+        let failsafe = null;
+        if (PRESET.pullOnOpen && PRESET.waitMs > 0) { de.style.visibility = 'hidden'; failsafe = setTimeout(() => { de.style.visibility = ''; }, PRESET.waitMs); }
+        (async () => {
+            const res = await runSync();
+            if (res.reload && reloadOnce()) return;           // đang tải lại trang với dữ liệu mới
+            if (failsafe) { clearTimeout(failsafe); de.style.visibility = ''; }
+            startWatching();
+        })();
+    }
+    if (PRESET.pullOnOpen) boot();                            // đồng bộ NGAY khi mở app, không chờ trình duyệt rảnh
+    else if (document.readyState === 'complete') whenIdle(boot, 3000);
+    else window.addEventListener('load', () => whenIdle(boot, 3000));
+})();
+</script>
+
+    <script src="https://cdn.tailwindcss.com"></script>
     <!-- SheetJS for Excel Reading and Template Generation -->
-
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <!-- FontAwesome Pro Free Icons -->
-    <!-- Icon CSS loads in parallel without blocking first paint. -->
-    <link rel="preload" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
-    <noscript><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"></noscript>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Chart.js for Multi-Period Analytics -->
-
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     
-    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eff6ff',
+                            500: '#3b82f6',
+                            600: '#2563eb',
+                            700: '#1d4ed8',
+                            900: '#1e3a8a',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
 
     <style>
         html, body { height: 100%; overflow-x: hidden; }
@@ -72,12 +898,24 @@
             color: #fbbf24 !important;
         }
 
-        /* Stable geometry; progress and stripes animate with transform. */
-        #prog-bar-fill,#bulk-avatar-progress-fill,#bulk-avatar-background-fill{width:100%;transform:scaleX(0);transform-origin:left center;transition:transform 300ms ease-out}
-        .progress-striped{position:relative;overflow:hidden}
-        .progress-striped::after{content:'';position:absolute;inset:0;pointer-events:none;background-image:linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);background-size:1rem 1rem;animation:progress-stripes 1s linear infinite;will-change:transform}
-        @keyframes progress-stripes{from{transform:translateX(0)}to{transform:translateX(-1rem)}}
-        @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
+        .progress-striped {
+            background-image: linear-gradient(
+                45deg,
+                rgba(255, 255, 255, 0.15) 25%,
+                transparent 25%,
+                transparent 50%,
+                rgba(255, 255, 255, 0.15) 50%,
+                rgba(255, 255, 255, 0.15) 75%,
+                transparent 75%,
+                transparent
+            );
+            background-size: 1rem 1rem;
+            animation: progress-stripes 1s linear infinite;
+        }
+        @keyframes progress-stripes {
+            0% { background-position: 1rem 0; }
+            100% { background-position: 0 0; }
+        }
 
         .folder-tab-active {
             background-color: rgba(20, 184, 166, 0.2) !important;
@@ -625,7 +1463,7 @@
 
                 <div class="text-xs text-slate-400 hidden lg:block">Theo dõi Follower (Tuần, Tháng, Năm) & Reaction bài viết tự động</div>
             </div>
-            <div id="pages-table-scroll" class="overflow-x-auto" style="max-height: calc(100vh - 340px);">
+            <div class="overflow-x-auto" style="max-height: calc(100vh - 340px);">
                 <table class="w-full text-xs text-left">
                     <thead class="bg-slate-950 text-slate-400 uppercase tracking-wider text-[10px] font-bold sticky top-0 z-10 border-b border-slate-800">
                         <tr>
@@ -646,22 +1484,6 @@
                     </thead>
                     <tbody id="pages-table-body" class="divide-y divide-slate-800/60"></tbody>
                 </table>
-            </div>
-            <div id="pages-pagination" class="flex flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-950/40 px-4 py-2.5 text-[11px]">
-                <div class="flex items-center gap-2 text-slate-400">
-                    <span id="page-pagination-summary">0 Page</span>
-                    <label for="page-table-page-size" class="ml-2">Mỗi trang:</label>
-                    <select id="page-table-page-size" onchange="changePageTableSize(this.value)" class="bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-slate-200">
-                        <option value="50">50</option>
-                        <option value="100" selected>100</option>
-                        <option value="200">200</option>
-                    </select>
-                </div>
-                <div class="flex items-center gap-2">
-                    <button id="page-pagination-prev" type="button" onclick="changePageTablePage(-1)" class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 px-2.5 py-1 rounded-lg">Trước</button>
-                    <span id="page-pagination-page-label" class="min-w-16 text-center text-slate-400">0 / 0</span>
-                    <button id="page-pagination-next" type="button" onclick="changePageTablePage(1)" class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 px-2.5 py-1 rounded-lg">Sau</button>
-                </div>
             </div>
             <div id="empty-state" class="hidden text-center py-20 bg-slate-950/20">
                 <div class="w-16 h-16 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center mx-auto mb-3 shadow-inner">
@@ -705,7 +1527,7 @@
                     </div>
 
                     <div class="w-full bg-slate-900 rounded-full h-5 overflow-hidden border border-slate-800 p-0.5 relative shadow-inner">
-                        <div id="prog-bar-fill" class="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-500 to-emerald-500 progress-striped flex items-center justify-end pr-2 text-[10px] font-bold text-white shadow-lg" style="width:100%;transform:scaleX(0);transform-origin:left center">
+                        <div id="prog-bar-fill" class="h-full rounded-full bg-gradient-to-r from-orange-500 via-amber-500 to-emerald-500 transition-all duration-300 ease-out progress-striped flex items-center justify-end pr-2 text-[10px] font-bold text-white shadow-lg" style="width: 0%">
                         </div>
                     </div>
                 </div>
@@ -1760,14 +2582,6 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                             <tbody id="post-library-table-body" class="divide-y divide-slate-800/80 text-slate-300"></tbody>
                         </table>
                     </div>
-                    <div id="library-post-pagination" class="hidden flex-wrap items-center justify-between gap-2 border-t border-slate-800 bg-slate-950/40 px-3 py-2 text-[11px]">
-                        <span id="library-post-pagination-summary" class="text-slate-400">0 bài</span>
-                        <div class="flex items-center gap-2">
-                            <button type="button" onclick="changeLibraryPage(-1)" class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 px-2.5 py-1 rounded-lg">Trước</button>
-                            <span id="library-post-pagination-label" class="min-w-16 text-center text-slate-400">0 / 0</span>
-                            <button type="button" onclick="changeLibraryPage(1)" class="bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-slate-200 px-2.5 py-1 rounded-lg">Sau</button>
-                        </div>
-                    </div>
                 </div>
 
                 <div class="lg:col-span-5 space-y-4 bg-slate-950 border border-slate-800 rounded-2xl p-4 shadow-lg">
@@ -2109,7 +2923,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                     <span id="bulk-avatar-progress-label" class="font-bold text-slate-200">Đang chuẩn bị...</span>
                     <span id="bulk-avatar-progress-count" class="font-mono text-fuchsia-200">0 / 0</span>
                 </div>
-                <div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div id="bulk-avatar-progress-fill" class="h-full w-full bg-gradient-to-r from-fuchsia-600 to-pink-400" style="transform:scaleX(0);transform-origin:left center"></div></div>
+                <div class="h-2 rounded-full bg-slate-800 overflow-hidden"><div id="bulk-avatar-progress-fill" class="h-full w-0 bg-gradient-to-r from-fuchsia-600 to-pink-400 transition-all"></div></div>
                 <div id="bulk-avatar-current-page" class="text-[10px] text-slate-400 mt-2"></div>
                 <p class="text-[9px] text-slate-500 mt-1">Có thể thu nhỏ cửa sổ trong lúc cập nhật; tiến trình vẫn tiếp tục chạy.</p>
                 <div id="bulk-avatar-results" class="mt-2 max-h-36 overflow-y-auto space-y-1"></div>
@@ -2130,847 +2944,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             <span id="bulk-avatar-background-label" class="flex-1 text-[11px] font-bold text-slate-100">Đang cập nhật ảnh đại diện...</span>
             <button id="bulk-avatar-background-dismiss" onclick="dismissBulkAvatarBackgroundTask()" class="hidden text-slate-500 hover:text-white" title="Ẩn thông báo"><i class="fa-solid fa-xmark"></i></button>
         </div>
-        <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div id="bulk-avatar-background-fill" class="h-full w-full bg-gradient-to-r from-fuchsia-600 to-pink-400" style="transform:scaleX(0);transform-origin:left center"></div></div>
+        <div class="h-1.5 rounded-full bg-slate-800 overflow-hidden"><div id="bulk-avatar-background-fill" class="h-full w-0 bg-gradient-to-r from-fuchsia-600 to-pink-400 transition-all"></div></div>
         <div class="flex items-center justify-between gap-2 mt-2">
             <span id="bulk-avatar-background-count" class="text-[10px] text-slate-400 font-mono">0 / 0 Page</span>
             <button id="bulk-avatar-background-open" onclick="reopenBulkAvatarProgress()" class="text-[10px] text-fuchsia-200 hover:text-white font-bold">Mở tiến trình</button>
         </div>
     </div>
 
-<script>
-(function () {
-    'use strict';
-    if (window.__GHS_LOADED__) return;
-    window.__GHS_LOADED__ = true;
-
-    let LS;
-    try { LS = window.localStorage; void LS.length; }
-    catch (e) { console.warn('GitHub Sync: không truy cập được localStorage'); return; }
-
-    // ====== CÓ THỂ ĐIỀN SẴN (không bắt buộc). Token KHÔNG điền ở đây vì file này nằm trên GitHub Pages công khai ======
-    const PRESET = {
-        owner: '', repo: '', branch: 'main',
-        path: '',          // trống = tự đặt theo địa chỉ trang
-        delayMs: 30000,    // chờ 30 giây kể từ thao tác thay đổi cuối cùng rồi mới đồng bộ
-        pullOnOpen: true,  // true  = mở app/quay lại tab là đồng bộ ngay (mặc định), rồi tiếp tục đồng bộ mỗi khi có thay đổi
-                           // false = chỉ đồng bộ khi có thay đổi (mở app không gọi GitHub)
-        waitMs: 0          // chỉ dùng khi pullOnOpen = true: 0 = app mở ngay; 500-800 = chờ dữ liệu mới trước khi hiện trang
-    };
-    // ==============================================================================================================
-
-    const CFG_KEY = 'ghs_config_v2', META_KEY = 'ghs_meta_v5', BACKUP_KEY = 'ghs_backup_v1';
-    const loadJSON = (k, d) => { try { const v = JSON.parse(LS.getItem(k)); return v && typeof v === 'object' ? v : d; } catch (e) { return d; } };
-
-    function defaultPath() {
-        const slug = (location.hostname + location.pathname).replace(/index\.html?$/i, '')
-            .replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '').toLowerCase().slice(0, 80) || 'app';
-        return 'sync-' + slug + '.json';
-    }
-
-    let cfg = Object.assign({ owner: PRESET.owner, repo: PRESET.repo, branch: PRESET.branch || 'main', path: PRESET.path || defaultPath(), token: '', include: '', exclude: '' }, loadJSON(CFG_KEY, {}));
-    let meta = Object.assign({ sha: null, letag: null, base: null, dirty: false, localChangedAt: 0 }, loadJSON(META_KEY, {}));
-    const saveCfg = () => LS.setItem(CFG_KEY, JSON.stringify(cfg));
-    const saveMeta = () => LS.setItem(META_KEY, JSON.stringify(meta));
-    const configured = () => !!(cfg.owner && cfg.repo && cfg.token);
-
-    // Thiết lập nhanh từ địa chỉ: #ghs=TOKEN&owner=...&repo=...&branch=...
-    (function importFromHash() {
-        try {
-            const p = new URLSearchParams(location.hash.replace(/^#/, ''));
-            if (!p.get('ghs')) return;
-            cfg.token = p.get('ghs');
-            if (p.get('owner')) cfg.owner = p.get('owner');
-            if (p.get('repo')) cfg.repo = p.get('repo');
-            if (p.get('branch')) cfg.branch = p.get('branch');
-            saveCfg();
-            history.replaceState(null, '', location.pathname + location.search);
-        } catch (e) { /* bỏ qua */ }
-    })();
-
-    let syncing = false, again = false, muted = false, changeSeq = 0, lastCheckAt = 0, lastSig = '';
-    let syncBatchDepth = 0, syncBatchChanged = false;
-    let pushTimer = null, retryTimer = null, watchTimer = null;
-    let cur = { state: 'off', msg: '' }, ui = null;
-
-    // ---------- Nhường luồng chính cho app (tránh giật/khựng) ----------
-    const yieldMain = () => new Promise(r => {
-        if (typeof scheduler !== 'undefined' && scheduler.yield) scheduler.yield().then(r); else setTimeout(r, 0);
-    });
-    const whenIdle = (fn, timeout) => { if (window.requestIdleCallback) window.requestIdleCallback(fn, { timeout: timeout || 2000 }); else setTimeout(fn, 200); };
-
-    // ---------- Phạm vi dữ liệu (mẫu lọc được biên dịch sẵn để kiểm tra nhanh) ----------
-    const lines = s => String(s || '').split(/[\n,]+/).map(x => x.trim()).filter(Boolean);
-    const compile = c => ({ inc: lines(c.include), exc: lines(c.exclude) });
-    let pats = compile(cfg);
-    const match = (key, pat) => pat.charAt(pat.length - 1) === '*' ? key.startsWith(pat.slice(0, -1)) : key === pat;
-    function inScope(key, c) {
-        if (key.indexOf('ghs_') === 0) return false;
-        const p = c ? compile(c) : pats;
-        if (p.exc.length && p.exc.some(x => match(key, x))) return false;
-        if (p.inc.length && !p.inc.some(x => match(key, x))) return false;
-        return true;
-    }
-    function scopedKeys() {
-        const ks = [];
-        for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k !== null && inScope(k)) ks.push(k); }
-        return ks.sort();
-    }
-    function snapshot() { const d = {}; scopedKeys().forEach(k => { d[k] = LS.getItem(k); }); return d; }
-    // Chữ ký rẻ (số key + tổng độ dài) để bắt thay đổi mà app ghi trực tiếp kiểu localStorage.x = ...
-    function sig() {
-        let n = 0, t = 0;
-        for (let i = 0; i < LS.length; i++) { const k = LS.key(i); if (k !== null && inScope(k)) { n++; t += (LS.getItem(k) || '').length; } }
-        return n + ':' + t;
-    }
-
-    // Băm bằng SHA-1 của trình duyệt (chạy ngoài luồng chính). Không có thì dùng djb2.
-    const subtle = (window.crypto && window.crypto.subtle && window.crypto.subtle.digest) ? window.crypto.subtle : null;
-    function djb(s) { let h = 5381; for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0; return 'd' + h + ':' + s.length; }
-    async function hashStr(s) {
-        if (subtle) {
-            try {
-                const a = new Uint8Array(await subtle.digest('SHA-1', new TextEncoder().encode(s)));
-                let h = 's'; for (let i = 0; i < 8; i++) h += a[i].toString(16).padStart(2, '0');
-                return h + ':' + s.length;
-            } catch (e) { /* rơi xuống djb2 */ }
-        }
-        return djb(s);
-    }
-    const H = async v => (v === null || v === undefined) ? '∅' : hashStr(String(v));
-    async function hashMap(obj) {
-        const ks = Object.keys(obj), hs = await Promise.all(ks.map(k => H(obj[k])));
-        const o = {}; ks.forEach((k, i) => { o[k] = hs[i]; }); return o;
-    }
-
-    // ---------- Tiện ích ----------
-    function toB64(str) {                                      // mã hóa base64 bằng Blob/FileReader (nhanh, không chặn)
-        if (typeof FileReader !== 'undefined' && typeof Blob !== 'undefined') {
-            return new Promise((res, rej) => {
-                const fr = new FileReader();
-                fr.onload = () => res(String(fr.result).split(',')[1] || '');
-                fr.onerror = () => rej(fr.error || new Error('Không mã hóa được dữ liệu'));
-                fr.readAsDataURL(new Blob([str]));
-            });
-        }
-        const bytes = new TextEncoder().encode(str); let bin = '';
-        for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-        return Promise.resolve(btoa(bin));
-    }
-    function mkErr(s) {
-        const e = new Error('GitHub ' + s + (s === 401 ? ' (token sai/hết hạn)' : s === 403 ? ' (thiếu quyền Contents hoặc bị giới hạn)' : s === 404 ? ' (không thấy repo/branch, kiểm tra tên và quyền token)' : ''));
-        e.status = s; return e;
-    }
-    const enc = p => p.split('/').map(encodeURIComponent).join('/');
-    const repoUrl = () => 'https://api.github.com/repos/' + encodeURIComponent(cfg.owner) + '/' + encodeURIComponent(cfg.repo);
-    const apiUrl = () => repoUrl() + '/contents/' + enc(cfg.path);
-    const dirPart = () => cfg.path.indexOf('/') < 0 ? '' : cfg.path.slice(0, cfg.path.lastIndexOf('/'));
-    const namePart = () => cfg.path.slice(cfg.path.lastIndexOf('/') + 1);
-    const listUrl = () => repoUrl() + '/contents' + (dirPart() ? '/' + enc(dirPart()) : '') + '?ref=' + encodeURIComponent(cfg.branch);
-    const hdr = extra => Object.assign({ Authorization: 'Bearer ' + cfg.token, Accept: 'application/vnd.github+json' }, extra || {});
-    function reloadOnce() {                                    // chống vòng lặp tải lại
-        try {
-            const t = Number(sessionStorage.getItem('ghs_rl') || 0);
-            if (Date.now() - t < 8000) return false;
-            sessionStorage.setItem('ghs_rl', String(Date.now()));
-        } catch (e) { /* bỏ qua */ }
-        location.reload(); return true;
-    }
-    function silently(fn) { muted = true; try { return fn(); } finally { muted = false; } }
-
-    // ---------- Trạng thái ----------
-    const ST = {
-        off:   ['off',   'GitHub Sync',   'Chưa kết nối.'],
-        ok:    ['ok',    'Đã đồng bộ',    'Dữ liệu đã khớp với GitHub.'],
-        sync:  ['sync',  'Đang đồng bộ…', 'Đang trao đổi dữ liệu với GitHub…'],
-        dirty: ['dirty', 'Chờ lưu…',      'Có thay đổi, sắp tự đồng bộ lên GitHub.'],
-        err:   ['err',   'Lỗi đồng bộ',   'Đồng bộ lỗi.']
-    };
-    function setStatus(state, msg) {
-        if (!configured()) state = 'off';
-        cur = { state: state, msg: msg || ST[state][2] };
-        renderStatus();
-    }
-    function renderStatus() {
-        if (!ui) return;
-        const s = ST[cur.state];
-        ui.dot.className = 'dot ' + s[0];
-        ui.label.textContent = s[1];
-        ui.status.textContent = cur.msg;
-        ui.btn.title = cur.msg;
-    }
-
-    // ---------- GitHub API ----------
-    // Kiểm tra NHẸ: chỉ xem danh sách thư mục chứa file để lấy mã (sha) của file, không tải nội dung.
-    // Có ETag nên nếu không có gì mới GitHub trả 304 (rất nhanh, không tính vào giới hạn API).
-    async function remoteHead(cond) {
-        const useCond = !!(cond && meta.letag && meta.sha);
-        const r = await fetch(listUrl(), { headers: hdr(useCond ? { 'If-None-Match': meta.letag } : {}), cache: 'no-store', priority: 'low' });
-        if (r.status === 304) return { sha: meta.sha, unchanged: true };
-        if (r.status === 404) {
-            const rr = await fetch(repoUrl(), { headers: hdr(), cache: 'no-store' });
-            if (!rr.ok) throw mkErr(rr.status);
-            return { sha: null, unchanged: false };            // repo có, nhưng chưa có thư mục/file dữ liệu
-        }
-        if (!r.ok) throw mkErr(r.status);
-        const etag = r.headers && r.headers.get ? r.headers.get('ETag') : null;
-        const arr = await r.json();
-        const ent = Array.isArray(arr) ? arr.find(x => x.name === namePart() && x.type === 'file') : null;
-        const sha = ent ? ent.sha : null;
-        const unchanged = !!(sha && sha === meta.sha);
-        if (unchanged && etag && etag !== meta.letag) { meta.letag = etag; saveMeta(); }
-        return { sha: sha, unchanged: unchanged };
-    }
-    // Tải nội dung file dạng văn bản thô (không qua base64 nên nhanh hơn nhiều)
-    async function fetchDoc() {
-        const r = await fetch(apiUrl() + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr({ Accept: 'application/vnd.github.raw+json' }), cache: 'no-store' });
-        if (r.status === 404) return null;
-        if (!r.ok) throw mkErr(r.status);
-        const text = await r.text();
-        try { return JSON.parse(text); } catch (e) { throw new Error('File dữ liệu trên GitHub không đúng định dạng JSON'); }
-    }
-
-    // ---------- Kho media dùng chung cho file tải lên từ máy tính ----------
-    const MEDIA_ROOT = 'fcc-media/page-control/';
-    const MEDIA_MAX_BYTES = 50 * 1024 * 1024;
-    let lastMediaRequestAt = 0;
-    const mediaApiUrl = path => repoUrl() + '/contents/' + enc(path);
-    function isSafeMediaPath(path) {
-        if (typeof path !== 'string' || !path.startsWith(MEDIA_ROOT)) return false;
-        return path.split('/').every(part => part && part !== '.' && part !== '..');
-    }
-    async function blobToB64(blob, onProgress) {
-        if (typeof FileReader !== 'undefined') {
-            return new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                const timeout = setTimeout(() => reader.abort(), 120000);
-                reader.onprogress = event => {
-                    if (event.lengthComputable && typeof onProgress === 'function') {
-                        onProgress(`đang chuẩn bị media ${Math.floor((event.loaded / event.total) * 100)}%`);
-                    }
-                };
-                reader.onload = () => {
-                    clearTimeout(timeout);
-                    const dataUrl = String(reader.result || '');
-                    const comma = dataUrl.indexOf(',');
-                    if (comma < 0) return reject(new Error('Không mã hóa được file media.'));
-                    resolve(dataUrl.slice(comma + 1));
-                };
-                reader.onerror = () => {
-                    clearTimeout(timeout);
-                    reject(reader.error || new Error('Không mã hóa được file media.'));
-                };
-                reader.onabort = () => {
-                    clearTimeout(timeout);
-                    reject(new Error('Đã hết thời gian chuẩn bị file media hoặc thao tác bị hủy.'));
-                };
-                reader.readAsDataURL(blob);
-            });
-        }
-        const bytes = new Uint8Array(await blob.arrayBuffer());
-        let binary = '';
-        for (let i = 0; i < bytes.length; i += 0x8000) {
-            binary += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
-        }
-        return btoa(binary);
-    }
-    async function fetchMediaWithTimeout(url, options = {}, timeoutMs = 20000) {
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), timeoutMs);
-        try {
-            return await fetch(url, Object.assign({}, options, { signal: controller.signal }));
-        } finally {
-            clearTimeout(timeout);
-        }
-    }
-
-    function sendMediaUploadRequest(url, requestBody, onProgress) {
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('PUT', url, true);
-            xhr.timeout = 600000;
-            xhr.setRequestHeader('Authorization', 'Bearer ' + cfg.token);
-            xhr.setRequestHeader('Accept', 'application/vnd.github+json');
-            xhr.setRequestHeader('Content-Type', 'application/json');
-            let lastProgressAt = 0;
-            let stalled = false;
-            let stallTimer = null;
-            const clearStallTimer = () => { if (stallTimer) clearTimeout(stallTimer); stallTimer = null; };
-            const resetStallTimer = () => {
-                clearStallTimer();
-                stallTimer = setTimeout(() => { stalled = true; xhr.abort(); }, 45000);
-            };
-            xhr.upload.onprogress = event => {
-                resetStallTimer();
-                if (!event.lengthComputable || typeof onProgress !== 'function') return;
-                const percent = Math.floor((event.loaded / event.total) * 100);
-                if (percent === 100 || Date.now() - lastProgressAt >= 300) {
-                    lastProgressAt = Date.now();
-                    onProgress(percent >= 100
-                        ? 'đã gửi media 100%; đang chờ GitHub xác nhận'
-                        : `đang tải media lên GitHub ${percent}%`);
-                }
-            };
-            xhr.onreadystatechange = () => { if (xhr.readyState === 2) resetStallTimer(); };
-            xhr.onload = () => {
-                clearStallTimer();
-                resolve({
-                    status: xhr.status,
-                    ok: xhr.status >= 200 && xhr.status < 300,
-                    headers: { get: name => { try { return xhr.getResponseHeader(name); } catch (e) { return null; } } },
-                    clone: () => ({ json: async () => JSON.parse(xhr.responseText || '{}') })
-                });
-            };
-            xhr.onerror = () => { clearStallTimer(); reject(new Error('Kết nối GitHub bị gián đoạn.')); };
-            xhr.ontimeout = () => { clearStallTimer(); reject(new Error('GitHub không phản hồi trong 10 phút.')); };
-            xhr.onabort = () => {
-                clearStallTimer();
-                reject(new Error(stalled ? 'Không có tiến triển khi tải lên hoặc chờ GitHub xác nhận trong 45 giây.' : 'Đã hủy yêu cầu tải media lên GitHub.'));
-            };
-            resetStallTimer();
-            xhr.send(requestBody);
-        });
-    }
-
-    async function uploadMedia(file, id, onProgress) {
-        if (!configured()) throw new Error('Hãy kết nối GitHub Sync trước khi lưu file để dùng trên máy khác.');
-        if (!file || typeof file.size !== 'number') throw new Error('File tải lên không hợp lệ.');
-        if (file.size > MEDIA_MAX_BYTES) throw new Error('File vượt quá 50 MiB. Hãy dùng file nhỏ hơn hoặc lưu media ở dịch vụ lưu trữ riêng.');
-
-        const safeId = String(id || '').replace(/[^a-zA-Z0-9_-]/g, '');
-        const safeName = String(file.name || 'media').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
-            .replace(/[^a-zA-Z0-9._-]+/g, '_').slice(-100) || 'media';
-        if (!safeId) throw new Error('Không tạo được mã file để lưu lên GitHub.');
-        const path = MEDIA_ROOT + safeId + '-' + safeName;
-        const url = mediaApiUrl(path);
-        const body = {
-            message: 'store uploaded media ' + safeId,
-            content: await blobToB64(file, onProgress),
-            branch: cfg.branch
-        };
-        const requestBody = JSON.stringify(body);
-        const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-        const maxAttempts = 4;
-        for (let attempt = 0; attempt < maxAttempts; attempt++) {
-            let r;
-            try {
-                const gap = 800 - (Date.now() - lastMediaRequestAt);
-                if (gap > 0) await delay(gap);
-                lastMediaRequestAt = Date.now();
-                r = await sendMediaUploadRequest(url, requestBody, onProgress);
-            } catch (error) {
-                if (attempt === maxAttempts - 1) {
-                    throw new Error(`Mạng bị gián đoạn khi tải "${file.name || safeName}" lên GitHub: ${error.message || 'hết thời gian chờ'}`);
-                }
-                if (typeof onProgress === 'function') onProgress(`mạng chập chờn; tự thử lại lần ${attempt + 2}/${maxAttempts}`);
-                await delay(Math.min(1000 * Math.pow(2, attempt), 15000));
-                continue;
-            }
-
-            if (r.status === 409 || r.status === 422) {
-                // Một lần thử trước có thể đã ghi file nhưng mất phản hồi mạng.
-                try {
-                    const existing = await fetchMediaWithTimeout(url + '?ref=' + encodeURIComponent(cfg.branch), { headers: hdr(), cache: 'no-store' });
-                    if (existing.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
-                } catch (error) {
-                    if (attempt === maxAttempts - 1) throw new Error('GitHub đã nhận file nhưng bước xác minh bị treo: ' + (error.message || String(error)));
-                    if (typeof onProgress === 'function') onProgress('đang xác minh file đã tải; tự thử lại...');
-                    await delay(Math.min(1000 * Math.pow(2, attempt), 15000));
-                    continue;
-                }
-            }
-            if (r.ok) return { path: path, fileName: file.name || safeName, size: file.size, type: file.type || '' };
-
-            let rateLimitMessage = '';
-            if (r.status === 403) {
-                try {
-                    const data = await r.clone().json();
-                    rateLimitMessage = data.message || '';
-                } catch (e) { /* response is not JSON */ }
-            }
-            const secondaryLimit = r.status === 403 && (
-                !!r.headers.get('Retry-After') ||
-                r.headers.get('X-RateLimit-Remaining') === '0' ||
-                /secondary rate limit|abuse detection|rate limit exceeded/i.test(rateLimitMessage)
-            );
-            const retryable = [408, 429, 500, 502, 503, 504].includes(r.status) || secondaryLimit;
-            if (retryable && attempt < maxAttempts - 1) {
-                const retryAfter = Number(r.headers.get('Retry-After') || 0);
-                const resetAt = Number(r.headers.get('X-RateLimit-Reset') || 0);
-                const waitMs = retryAfter > 0
-                    ? Math.min(retryAfter * 1000, 120000)
-                    : (r.headers.get('X-RateLimit-Remaining') === '0' && resetAt > 0
-                        ? Math.min(Math.max(resetAt * 1000 - Date.now(), 1000), 120000)
-                        : (secondaryLimit ? 60000 : Math.min(1000 * Math.pow(2, attempt), 15000)));
-                if (typeof onProgress === 'function') onProgress(`GitHub giới hạn tạm thời; chờ ${Math.ceil(waitMs / 1000)} giây rồi tự thử lại`);
-                await delay(waitMs);
-                continue;
-            }
-            if (secondaryLimit) throw new Error('GitHub đang giới hạn lượt tải media. Hãy đợi rồi thử lại. ' + rateLimitMessage);
-            throw mkErr(r.status);
-        }
-        throw new Error('Không thể tải media lên GitHub sau nhiều lần thử.');
-    }
-    async function downloadMedia(path) {
-        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để tải media từ kho dùng chung.');
-        if (!isSafeMediaPath(path)) throw new Error('Đường dẫn media trên GitHub không hợp lệ.');
-        const r = await fetch(mediaApiUrl(path) + '?ref=' + encodeURIComponent(cfg.branch), {
-            headers: hdr({ Accept: 'application/vnd.github.raw+json' }), cache: 'no-store'
-        });
-        if (r.status === 404) throw new Error('Không tìm thấy file media trên GitHub. Hãy kiểm tra kết nối hoặc đồng bộ lại Kho.');
-        if (!r.ok) throw mkErr(r.status);
-        return r.blob();
-    }
-    async function listMediaFiles() {
-        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để quét media trên GitHub.');
-        const refResponse = await fetch(repoUrl() + '/git/ref/heads/' + enc(cfg.branch), { headers: hdr(), cache: 'no-store' });
-        if (!refResponse.ok) throw mkErr(refResponse.status);
-        const refData = await refResponse.json();
-        const commitSha = refData && refData.object && refData.object.sha;
-        if (!commitSha) throw new Error('Không đọc được mã commit của nhánh GitHub hiện tại.');
-
-        const treeResponse = await fetch(repoUrl() + '/git/trees/' + encodeURIComponent(commitSha) + '?recursive=1', { headers: hdr(), cache: 'no-store' });
-        if (!treeResponse.ok) throw mkErr(treeResponse.status);
-        const treeData = await treeResponse.json();
-        if (treeData.truncated) throw new Error('Kho GitHub quá lớn để quét an toàn một lượt; chưa xóa dữ liệu nào.');
-        return (treeData.tree || [])
-            .filter(entry => entry.type === 'blob' && isSafeMediaPath(entry.path))
-            .map(entry => ({ path: entry.path, sha: entry.sha, size: entry.size || 0 }));
-    }
-    async function deleteRemoteMedia(path, sha) {
-        if (!configured()) throw new Error('Hãy kết nối GitHub Sync để dọn media trên GitHub.');
-        if (!isSafeMediaPath(path) || !sha) throw new Error('Đường dẫn hoặc mã file GitHub không hợp lệ.');
-        const r = await fetch(mediaApiUrl(path), {
-            method: 'DELETE',
-            headers: hdr({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ message: 'remove orphan media ' + path.split('/').pop(), sha: sha, branch: cfg.branch })
-        });
-        if (!r.ok) throw mkErr(r.status);
-        return true;
-    }
-    window.__GHS_MEDIA__ = Object.freeze({ isConfigured: configured, upload: uploadMedia, download: downloadMedia, listMediaFiles: listMediaFiles, deleteRemoteMedia: deleteRemoteMedia, beginBatch: beginSyncBatch, endBatch: endSyncBatch, maxBytes: MEDIA_MAX_BYTES });
-
-    // Gộp dữ liệu 3 bên (máy này / GitHub / lần đồng bộ trước). Mỗi key xử lý riêng, không cần hỏi:
-    //  - chỉ 1 bên đổi  -> lấy bên đổi
-    //  - cả 2 bên cùng đổi 1 key -> bên mới hơn thắng
-    //  - máy chưa từng đồng bộ (base = null) -> GitHub ưu tiên, key chỉ có ở máy này vẫn được giữ lại
-    async function mergeData(local, remote, base, remTs, locTs) {
-        const out = {}; let changedLocal = false, needPush = false;
-        const keys = Array.from(new Set(Object.keys(local).concat(Object.keys(remote))));
-        for (let i = 0; i < keys.length; i++) {
-            const k = keys[i];
-            const l = (k in local) ? local[k] : null, r = (k in remote) ? remote[k] : null;
-            if (l === r) { if (l !== null) out[k] = l; continue; }
-            let pick;
-            if (!base) pick = (r !== null) ? 'r' : 'l';
-            else {
-                const b = (k in base) ? base[k] : '∅';
-                const hs = await Promise.all([H(l), H(r)]);
-                const lc = hs[0] !== b, rc = hs[1] !== b;
-                if (lc && !rc) pick = 'l';
-                else if (rc && !lc) pick = 'r';
-                else if (lc && rc) pick = (locTs > remTs) ? 'l' : 'r';
-                else pick = 'r';
-            }
-            const v = pick === 'l' ? l : r;
-            if (v !== null) out[k] = v;
-            if (pick === 'r') changedLocal = true; else needPush = true;
-        }
-        return { out: out, changedLocal: changedLocal, needPush: needPush };
-    }
-
-    function setLocal(out) {
-        const writeSnapshot = () => silently(() => {
-            // Free keys removed by the incoming snapshot before writing replacements. This matters
-            // on phones, where writing first and deleting stale values afterward can exceed quota.
-            scopedKeys().forEach(k => { if (!(k in out)) LS.removeItem(k); });
-            Object.keys(out).forEach(k => { if (LS.getItem(k) !== out[k]) LS.setItem(k, out[k]); });
-        });
-        try {
-            writeSnapshot();
-        } catch (error) {
-            const quotaExceeded = error && (
-                error.name === 'QuotaExceededError' || error.code === 22 || error.code === 1014 ||
-                /quota|storage.*full/i.test(error.message || '')
-            );
-            if (!quotaExceeded) throw error;
-
-            // The GitHub copy is the recovery source; release the duplicate local restore snapshot,
-            // then retry the same incoming state once.
-            try { silently(() => LS.removeItem(BACKUP_KEY)); } catch (cleanupError) { /* best effort */ }
-            try {
-                writeSnapshot();
-            } catch (retryError) {
-                const storageError = new Error('Dung lượng trình duyệt trên thiết bị đã đầy. Đã thử bỏ bản sao lưu cục bộ nhưng vẫn không đủ chỗ để nhận dữ liệu GitHub. Hãy giải phóng dung lượng của Kho trên thiết bị rồi đồng bộ lại.');
-                storageError.name = 'QuotaExceededError';
-                throw storageError;
-            }
-        }
-    }
-    function backupLocal(data) {
-        try {
-            const serialized = JSON.stringify({ at: Date.now(), data: data });
-            // Large full snapshots duplicate the entire app state and frequently fill mobile storage.
-            // GitHub keeps the authoritative copy, so retain only small local restore points.
-            if (serialized.length > 262144) { silently(() => LS.removeItem(BACKUP_KEY)); return; }
-            silently(() => LS.setItem(BACKUP_KEY, serialized));
-        } catch (e) { /* hết dung lượng thì bỏ qua */ }
-    }
-
-    // Một vòng đồng bộ 2 chiều. Trả về { reload } nếu dữ liệu máy này vừa được cập nhật từ GitHub.
-    async function syncOnce(attempt) {
-        const seq0 = changeSeq;
-        const quick = !meta.dirty && attempt === 0 && !!meta.base;          // không có gì chờ lưu: chỉ kiểm tra nhẹ
-        const head = await remoteHead(quick);
-        if (head.unchanged && !meta.dirty) { lastCheckAt = Date.now(); return { reload: false }; }   // GitHub không có gì mới
-
-        await yieldMain();
-        const sig0 = sig();
-        const localData = snapshot();
-        let m, nb = null, extra = {};
-
-        if (head.unchanged && meta.base && meta.extra) {
-            // GitHub chưa đổi từ lần đồng bộ trước -> mọi khác biệt đều do máy này, khỏi tải file về
-            extra = meta.extra;
-            nb = await hashMap(localData);
-            let diff = false;
-            new Set(Object.keys(nb).concat(Object.keys(meta.base))).forEach(k => { if ((nb[k] || '∅') !== (meta.base[k] || '∅')) diff = true; });
-            m = { out: localData, changedLocal: false, needPush: diff };
-        } else {
-            const doc = head.sha ? await fetchDoc() : null;
-            const remAll = (doc && doc.data) || {};
-            const remData = {};
-            Object.keys(remAll).forEach(k => {
-                if (inScope(k)) remData[k] = typeof remAll[k] === 'string' ? remAll[k] : JSON.stringify(remAll[k]);
-                else extra[k] = remAll[k];
-            });
-            await yieldMain();
-            m = await mergeData(localData, remData, meta.base, (doc && Number(doc.updatedAt)) || 0, meta.localChangedAt || 0);
-        }
-
-        let reload = false;
-        if (m.changedLocal) { backupLocal(localData); setLocal(m.out); reload = true; }
-
-        let newSha = head.sha;
-        if (m.needPush) {
-            await yieldMain();
-            const text = JSON.stringify({ app: 'github-sync', updatedAt: Date.now(), origin: location.origin, data: Object.assign({}, extra, m.out) });
-            const body = { message: 'sync ' + new Date().toISOString(), content: await toB64(text), branch: cfg.branch };
-            if (head.sha) body.sha = head.sha;
-            const r = await fetch(apiUrl(), { method: 'PUT', headers: hdr({ 'Content-Type': 'application/json' }), body: JSON.stringify(body) });
-            if (r.status === 409 || r.status === 422) {                   // máy khác vừa ghi: gộp lại với bản mới nhất
-                if (attempt < 3) { const res2 = await syncOnce(attempt + 1); res2.reload = res2.reload || reload; return res2; }
-                throw mkErr(r.status);
-            }
-            if (!r.ok) throw mkErr(r.status);
-            newSha = (await r.json()).content.sha;
-            meta.letag = null;                                            // lần kiểm tra sau sẽ lấy ETag mới
-        } else if (head.sha !== meta.sha) meta.letag = null;
-
-        if (!nb || m.changedLocal) nb = await hashMap(m.out);
-        meta.sha = newSha; meta.base = nb;
-        if (JSON.stringify(extra).length < 200000) meta.extra = extra; else delete meta.extra;
-        meta.dirty = (changeSeq !== seq0);                                // có thay đổi mới trong lúc đồng bộ -> chạy thêm vòng nữa
-        saveMeta();
-        lastSig = m.changedLocal ? sig() : sig0;
-        lastCheckAt = Date.now();
-        if (meta.dirty) again = true;
-        return { reload: reload };
-    }
-
-    async function runSync() {
-        if (!configured()) return { reload: false };
-        if (syncing) { again = true; return { reload: false }; }
-        syncing = true; clearTimeout(retryTimer); setStatus('sync');
-        const res = { reload: false };
-        try {
-            let loops = 0;
-            do { again = false; const r = await syncOnce(0); if (r.reload) res.reload = true; } while (again && ++loops < 5);
-            setStatus('ok', 'Đã đồng bộ lúc ' + new Date().toLocaleTimeString());
-        } catch (e) {
-            setStatus('err', 'Lỗi: ' + e.message);
-            if (!e.status || e.status >= 500) retryTimer = setTimeout(autoSync, 30000);   // lỗi mạng: tự thử lại
-        } finally { syncing = false; }
-        return res;
-    }
-    function autoSync() { runSync().then(r => { if (r.reload) reloadOnce(); }); }
-
-    function beginSyncBatch() {
-        if (!syncBatchDepth) {
-            clearTimeout(pushTimer);
-            if (meta.dirty) syncBatchChanged = true;
-        }
-        syncBatchDepth++;
-    }
-    function endSyncBatch() {
-        if (!syncBatchDepth) return;
-        syncBatchDepth--;
-        if (!syncBatchDepth && syncBatchChanged) {
-            syncBatchChanged = false;
-            noteChange();
-        }
-    }
-
-    // Gọi ngay khi app ghi/xóa dữ liệu. Chờ yên delayMs rồi đồng bộ (vào lúc trình duyệt rảnh, nên không giật khi đang dùng app).
-    function noteChange() {
-        if (!configured()) return;
-        changeSeq++;
-        const was = meta.dirty;
-        meta.dirty = true; meta.localChangedAt = Date.now();
-        if (!was) saveMeta();
-        clearTimeout(pushTimer);
-        pushTimer = setTimeout(() => { saveMeta(); whenIdle(autoSync, 1500); }, PRESET.delayMs >= 0 ? PRESET.delayMs : 1000);
-        if (!syncing && cur.state !== 'dirty') setStatus('dirty');
-    }
-
-    // "Móc" vào localStorage để biết đúng lúc app lưu dữ liệu (không cần quét định kỳ)
-    let hooked = false;
-    try {
-        const P = Storage.prototype, oSet = P.setItem, oRm = P.removeItem, oClr = P.clear;
-        P.setItem = function (k, v) {
-            if (this === LS && !muted) {
-                const key = String(k);
-                if (inScope(key)) {
-                    const old = this.getItem(key);
-                    oSet.apply(this, arguments);
-                    if (old !== String(v)) {
-                        if (syncBatchDepth) syncBatchChanged = true;
-                        else noteChange();
-                    }
-                    return;
-                }
-            }
-            return oSet.apply(this, arguments);
-        };
-        P.removeItem = function (k) {
-            if (this === LS && !muted) {
-                const key = String(k);
-                if (inScope(key) && this.getItem(key) !== null) {
-                    oRm.apply(this, arguments);
-                    if (syncBatchDepth) syncBatchChanged = true;
-                    else noteChange();
-                    return;
-                }
-            }
-            return oRm.apply(this, arguments);
-        };
-        P.clear = function () {
-            const had = this === LS && !muted && scopedKeys().length > 0;
-            const r = oClr.apply(this, arguments);
-            if (had) {
-                if (syncBatchDepth) syncBatchChanged = true;
-                else noteChange();
-            }
-            return r;
-        };
-        hooked = true;
-    } catch (e) { hooked = false; }
-
-    // Phòng hờ (app ghi kiểu localStorage.x = ...): kiểm tra chữ ký rẻ, thưa, và bỏ qua khi tab đang ẩn
-    function startWatching() {
-        if (watchTimer) return;
-        lastSig = sig();
-        watchTimer = setInterval(() => {
-            if (syncing || syncBatchDepth || !configured() || document.visibilityState === 'hidden') return;
-            const s = sig();
-            if (s !== lastSig) { lastSig = s; noteChange(); }
-        }, hooked ? 20000 : 3000);
-    }
-
-    document.addEventListener('visibilitychange', () => {
-        if (!configured()) return;
-        if (document.visibilityState === 'hidden') {                      // rời tab/đóng app: lưu ngay
-            const s = sig();
-            if (s !== lastSig) {
-                lastSig = s;
-                if (syncBatchDepth) syncBatchChanged = true;
-                else noteChange();
-            }
-            clearTimeout(pushTimer);
-            if (meta.dirty) { saveMeta(); autoSync(); }
-            return;
-        }
-        if (!PRESET.pullOnOpen) return;                                   // chế độ "chỉ khi có thay đổi": quay lại tab không gọi GitHub
-        if (!meta.dirty && Date.now() - lastCheckAt < 15000) return;      // vừa kiểm tra xong, khỏi gọi lại
-        autoSync();                                                       // quay lại: kéo dữ liệu mới từ máy khác
-    });
-    window.addEventListener('online', () => { if (configured() && meta.dirty) autoSync(); });
-
-    // ---------- Giao diện (Shadow DOM, không đụng CSS của app; dựng khi trình duyệt rảnh) ----------
-    function buildUI() {
-        const host = document.createElement('div');
-        host.id = 'ghs-host';
-        const root = host.attachShadow({ mode: 'open' });
-        root.innerHTML = `
-<style>
-:host{all:initial}
-*{box-sizing:border-box;font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
-.btn{position:fixed;left:14px;bottom:14px;z-index:2147483646;display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:999px;background:#0f172a;color:#e2e8f0;border:1px solid #334155;font-size:12px;font-weight:700;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.35)}
-.btn:hover{border-color:#3b82f6}
-.dot{width:10px;height:10px;border-radius:50%;background:#64748b;flex:none}
-.dot.ok{background:#22c55e}.dot.sync{background:#3b82f6;animation:p 1s infinite}.dot.dirty{background:#f59e0b}.dot.err{background:#ef4444}
-@keyframes p{50%{opacity:.35}}
-.ov{position:fixed;inset:0;z-index:2147483647;background:rgba(2,6,23,.78);display:none;align-items:center;justify-content:center;padding:16px}
-.ov.open{display:flex}
-.box{width:100%;max-width:450px;max-height:92vh;overflow:auto;background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:16px;padding:18px;font-size:12px;line-height:1.45}
-.hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:14px}
-.x{background:none;border:0;color:#94a3b8;font-size:16px;cursor:pointer}
-.st{margin:0 0 10px;color:#94a3b8}
-.g2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-label{display:block;margin-bottom:8px;color:#cbd5e1}
-input,textarea{display:block;width:100%;margin-top:4px;padding:8px 10px;border-radius:8px;background:#020617;color:#f1f5f9;border:1px solid #334155;font-size:12px;outline:none}
-input:focus,textarea:focus{border-color:#3b82f6}
-textarea{resize:vertical}
-.row{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px}
-button.b{padding:9px;border-radius:8px;border:0;background:#1e293b;color:#e2e8f0;font-weight:700;font-size:12px;cursor:pointer}
-button.b:hover{background:#334155}
-button.p{background:#2563eb;color:#fff;grid-column:1/-1}button.p:hover{background:#1d4ed8}
-button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
-.keys{margin:8px 0 0;padding:8px;border-radius:8px;background:#020617;border:1px solid #334155;max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:11px;color:#cbd5e1}
-.note{margin:10px 0 0;color:#64748b;font-size:11px}
-</style>
-<button class="btn" id="btn" type="button"><span class="dot" id="dot"></span><span>☁</span><span id="label">GitHub Sync</span></button>
-<div class="ov" id="ov"><div class="box">
-  <div class="hd"><b>☁ Đồng bộ dữ liệu qua GitHub</b><button class="x" id="close" type="button">✕</button></div>
-  <p class="st" id="status"></p>
-  <div class="g2">
-    <label>Tài khoản GitHub<input id="owner" placeholder="vd: tenban" autocomplete="off"></label>
-    <label>Repo dữ liệu (private)<input id="repo" placeholder="vd: app-data" autocomplete="off"></label>
-    <label>Branch<input id="branch" placeholder="main" autocomplete="off"></label>
-    <label>Tên file lưu<input id="path" autocomplete="off"></label>
-  </div>
-  <label>GitHub Token (fine-grained, quyền Contents: Read and write)<input id="token" type="password" placeholder="github_pat_..." autocomplete="off"></label>
-  <label>Chỉ đồng bộ các key này (mỗi dòng 1 key, dùng * cho tiền tố; để trống = tất cả)<textarea id="include" rows="2" placeholder="vd: myapp_*"></textarea></label>
-  <label>Không đồng bộ các key này (vd: key chứa mật khẩu/token, hoặc key đổi liên tục)<textarea id="exclude" rows="2" placeholder="vd: theme"></textarea></label>
-  <div class="row">
-    <button class="b p" id="connect" type="button">Lưu &amp; kết nối</button>
-    <button class="b" id="syncnow" type="button">⟳ Đồng bộ ngay</button>
-    <button class="b" id="showkeys" type="button">Xem key đồng bộ</button>
-    <button class="b" id="pull" type="button">⬇ Ép tải từ GitHub</button>
-    <button class="b" id="restore" type="button">↩ Khôi phục bản sao lưu</button>
-    <button class="b d" id="off" type="button">Ngắt kết nối máy này</button>
-  </div>
-  <pre class="keys" id="keys" style="display:none"></pre>
-  <p class="note">Sau khi kết nối, app tự đồng bộ dữ liệu Kho mỗi khi bạn thao tác và khi mở app. File tải lên từ máy được lưu riêng trong thư mục fcc-media/page-control của repo, còn nội dung bài và thông tin file được đồng bộ qua localStorage. Nếu giới hạn key đồng bộ, hãy gồm fb_post_library_v12. Dùng repo private và cùng cấu hình GitHub Sync trên mọi máy. File tối đa 50 MiB; tệp lớn hơn nên dùng dịch vụ lưu trữ media riêng. GitHub lưu lịch sử các phiên bản file trong repo.</p>
-</div></div>`;
-        (document.body || document.documentElement).appendChild(host);
-        const $ = id => root.getElementById(id);
-        ui = { btn: $('btn'), dot: $('dot'), label: $('label'), status: $('status') };
-        renderStatus();
-
-        const fill = () => {
-            $('owner').value = cfg.owner; $('repo').value = cfg.repo; $('branch').value = cfg.branch;
-            $('path').value = cfg.path; $('token').value = cfg.token; $('include').value = cfg.include; $('exclude').value = cfg.exclude;
-            $('keys').style.display = 'none';
-        };
-        const readForm = () => ({
-            owner: $('owner').value.trim(), repo: $('repo').value.trim(), branch: $('branch').value.trim() || 'main',
-            path: $('path').value.trim() || defaultPath(), token: $('token').value.trim(),
-            include: $('include').value, exclude: $('exclude').value
-        });
-        const close = () => $('ov').classList.remove('open');
-        ui.btn.onclick = () => { fill(); $('ov').classList.add('open'); };
-        $('close').onclick = close;
-        $('ov').addEventListener('click', e => { if (e.target === $('ov')) close(); });
-
-        $('showkeys').onclick = () => {
-            const c = readForm(), out = [];
-            for (let i = 0; i < LS.length; i++) {
-                const k = LS.key(i); if (k === null || k.indexOf('ghs_') === 0) continue;
-                out.push((inScope(k, c) ? '✓ ' : '✗ ') + k + '  (' + (LS.getItem(k) || '').length + ' ký tự)');
-            }
-            $('keys').textContent = out.length ? '✓ = sẽ đồng bộ, ✗ = bỏ qua\n' + out.sort().join('\n') : 'Chưa có dữ liệu localStorage nào.';
-            $('keys').style.display = 'block';
-        };
-
-        $('connect').onclick = async () => {
-            const next = readForm();
-            if (!next.owner || !next.repo || !next.token) { setStatus('err', 'Nhập đủ tài khoản, repo và token.'); return; }
-            if (next.owner !== cfg.owner || next.repo !== cfg.repo || next.branch !== cfg.branch || next.path !== cfg.path) {
-                meta = { sha: null, letag: null, base: null, dirty: false, localChangedAt: 0 }; saveMeta();
-            }
-            cfg = next; pats = compile(cfg); saveCfg();
-            const res = await runSync();
-            if (cur.state === 'err') return;
-            startWatching(); close();
-            if (res.reload) reloadOnce();
-        };
-        $('syncnow').onclick = () => { if (!configured()) { setStatus('err', 'Chưa kết nối GitHub.'); return; } autoSync(); };
-        $('pull').onclick = async () => {
-            if (!configured()) { setStatus('err', 'Chưa kết nối GitHub.'); return; }
-            if (!confirm('Ghi đè TOÀN BỘ dữ liệu máy này bằng dữ liệu trên GitHub?')) return;
-            try {
-                setStatus('sync');
-                const head = await remoteHead(false);
-                const doc = head.sha ? await fetchDoc() : null;
-                if (!doc) { setStatus('ok', 'Chưa có file dữ liệu trên GitHub.'); return; }
-                backupLocal(snapshot());
-                const out = {};
-                Object.keys(doc.data || {}).forEach(k => { if (inScope(k)) { const v = doc.data[k]; out[k] = typeof v === 'string' ? v : JSON.stringify(v); } });
-                setLocal(out);
-                meta.sha = head.sha; meta.letag = null; meta.base = await hashMap(out); meta.dirty = false; delete meta.extra; saveMeta();
-                reloadOnce();
-            } catch (e) { setStatus('err', 'Lỗi: ' + e.message); }
-        };
-        $('restore').onclick = async () => {
-            const b = loadJSON(BACKUP_KEY, null);
-            if (!b || !b.data) { setStatus('err', 'Chưa có bản sao lưu nào trên máy này.'); return; }
-            if (!confirm('Khôi phục dữ liệu máy này về bản sao lưu lúc ' + new Date(b.at).toLocaleString() + ' và đẩy lên GitHub?')) return;
-            setLocal(b.data);
-            changeSeq++; meta.dirty = true; meta.localChangedAt = Date.now(); saveMeta();
-            await runSync();
-            if (cur.state !== 'err') reloadOnce();
-        };
-        $('off').onclick = () => {
-            if (!confirm('Ngắt kết nối GitHub trên máy này? (Dữ liệu trong app vẫn giữ nguyên)')) return;
-            silently(() => { LS.removeItem(CFG_KEY); LS.removeItem(META_KEY); });
-            clearInterval(watchTimer); watchTimer = null; clearTimeout(pushTimer); clearTimeout(retryTimer);
-            cfg = Object.assign({}, cfg, { token: '' }); meta = { sha: null, letag: null, base: null, dirty: false, localChangedAt: 0 };
-            fill(); setStatus('off');
-        };
-    }
-    const startUI = () => whenIdle(buildUI, 3000);
-    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', startUI); else startUI();
-
-    // ---------- Khởi động ----------
-    function boot() {
-        if (!configured()) return;
-        // Chỉ đồng bộ ngay khi mở app nếu: (1) có thay đổi chưa kịp lưu từ lần trước, (2) máy chưa từng đồng bộ, hoặc (3) bạn bật pullOnOpen.
-        const needNow = PRESET.pullOnOpen || meta.dirty || !meta.base;
-        if (!needNow) {
-            setStatus('ok', 'Tự đồng bộ mỗi khi có thay đổi. Bấm "Đồng bộ ngay" để kéo dữ liệu mới từ máy khác.');
-            startWatching();
-            return;
-        }
-        const de = document.documentElement;
-        let failsafe = null;
-        if (PRESET.pullOnOpen && PRESET.waitMs > 0) { de.style.visibility = 'hidden'; failsafe = setTimeout(() => { de.style.visibility = ''; }, PRESET.waitMs); }
-        (async () => {
-            const res = await runSync();
-            if (res.reload && reloadOnce()) return;           // đang tải lại trang với dữ liệu mới
-            if (failsafe) { clearTimeout(failsafe); de.style.visibility = ''; }
-            startWatching();
-        })();
-    }
-    if (PRESET.pullOnOpen) boot();                            // đồng bộ NGAY khi mở app, không chờ trình duyệt rảnh
-    else if (document.readyState === 'complete') whenIdle(boot, 3000);
-    else window.addEventListener('load', () => whenIdle(boot, 3000));
-})();
-</script>
-
     <script>
-        // Load feature libraries only when Excel/Analytics is first used.
-        const XLSX_CDN_URL='https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
-        const CHART_CDN_URL='https://cdn.jsdelivr.net/npm/chart.js';
-        let xlsxLoadPromise=null,chartLoadPromise=null;
-        function loadOptionalScript(url,name,ready,promise,setPromise,message){
-            if(ready())return Promise.resolve(window[name]);
-            if(!promise){promise=new Promise((resolve,reject)=>{const s=document.createElement('script');s.src=url;s.async=true;s.onload=()=>ready()?resolve(window[name]):reject(new Error(message));s.onerror=()=>reject(new Error(message));document.head.appendChild(s);}).catch(error=>{setPromise(null);throw error;});setPromise(promise);}
-            return promise;
-        }
-        function ensureXlsxLoaded(){return loadOptionalScript(XLSX_CDN_URL,'XLSX',()=>!!window.XLSX,xlsxLoadPromise,v=>{xlsxLoadPromise=v;},'Không tải được thư viện Excel. Hãy kiểm tra mạng rồi thử lại.');}
-        function ensureChartLoaded(){return loadOptionalScript(CHART_CDN_URL,'Chart',()=>!!window.Chart,chartLoadPromise,v=>{chartLoadPromise=v;},'Không tải được thư viện biểu đồ. Hãy kiểm tra mạng rồi thử lại.');}
-        async function getXlsxLibrary(){try{return await ensureXlsxLoaded();}catch(error){showToast(error.message||'Không tải được thư viện Excel.','error');return null;}}
-
         // --- GLOBAL STATE ---
         let pagesList = [];
         let bulkAvatarSelectedPageIds = new Set();
@@ -2985,13 +2966,6 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         let selectedLocalFiles = [];
         let scheduledQueue = [];
         let postLibrary = [];
-        // Keep large library lists bounded to 100 DOM rows and retain selection across pages.
-        const selectedLibraryPostIds = new Set();
-        const libraryPageSize = 100;
-        let libraryPage = 0;
-        let libraryFilterSignature = '';
-        let libraryTargetPageSignature = '';
-        let libraryCurrentFilteredIds = [];
         let mediaCleanupScan = { localOrphans: [], remoteOrphans: [], localScanned: false, remoteScanned: false };
         let pendingLibraryMediaFile = null;
         let removeExistingLibraryMedia = false;
@@ -3403,23 +3377,63 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
          * 3. Khớp Slug rút gọn
          * 4. Tìm tệp tương đồng nhất (Fuzzy match suggestion)
          */
-        function createBigramSet(value){const set=new Set();for(let i=0;i<value.length-1;i++)set.add(value.substring(i,i+2));return set;}
-        function calculateSimilarityFromSlug(s1,s2,cached=null){if(!s1||!s2)return 0;if(s1===s2)return 1;if(s1.includes(s2)||s2.includes(s1))return Math.min(s1.length,s2.length)/Math.max(s1.length,s2.length)*.92;const a=createBigramSet(s1),b=cached||createBigramSet(s2);let n=0;a.forEach(x=>{if(b.has(x))n++;});const total=a.size+b.size;return total?(2*n)/total:0;}
-        function createFileMatchIndex(files){
-            const exact=new Map(),base=new Map(),slug=new Map();
-            const entries=files.map(file=>{const clean=cleanExtractFilename(file.name),low=clean.toLowerCase(),baseName=getFileBaseName(clean).toLowerCase(),s=simplifySlug(file.name),entry={file,slug:s,bigrams:createBigramSet(s)};if(!exact.has(low))exact.set(low,file);if(!base.has(baseName))base.set(baseName,file);if(!slug.has(s))slug.set(s,file);return entry;});
-            return {files,exact,base,slug,entries};
-        }
-        /** Preserve match priority while reusing normalized filenames and bigrams per batch. */
-        function evaluateFileMatch(requestedRaw, availableFiles, assignedFileNames = new Set(), matchIndex = null){
-            if(!requestedRaw||!availableFiles||!availableFiles.length)return {matchedFile:null,matchType:'none',suggestion:null,score:0};
-            const clean=cleanExtractFilename(requestedRaw),low=clean.toLowerCase(),baseName=getFileBaseName(clean).toLowerCase(),s=simplifySlug(clean),idx=matchIndex&&matchIndex.files===availableFiles?matchIndex:createFileMatchIndex(availableFiles);
-            const e=idx.exact.get(low);if(e)return {matchedFile:e,matchType:'exact',suggestion:null,score:1};
-            const b=idx.base.get(baseName);if(b)return {matchedFile:b,matchType:'extension_variant',suggestion:null,score:.95};
-            const g=idx.slug.get(s);if(g)return {matchedFile:g,matchType:'slug_match',suggestion:null,score:.90};
-            let best=null,highest=0;for(const entry of idx.entries){const score=calculateSimilarityFromSlug(s,entry.slug,entry.bigrams);if(score>highest){highest=score;best=entry.file;}}
-            if(best&&highest>=.55)return {matchedFile:null,matchType:'fuzzy_suggestion',suggestion:best,score:Math.round(highest*100)};
-            return {matchedFile:null,matchType:'none',suggestion:null,score:0};
+        function evaluateFileMatch(requestedRaw, availableFiles, assignedFileNames = new Set()) {
+            if (!requestedRaw || !availableFiles || !availableFiles.length) {
+                return { matchedFile: null, matchType: 'none', suggestion: null, score: 0 };
+            }
+
+            const cleanReq = cleanExtractFilename(requestedRaw);
+            const cleanReqLower = cleanReq.toLowerCase();
+            const reqBaseName = getFileBaseName(cleanReq).toLowerCase();
+            const reqSlug = simplifySlug(cleanReq);
+
+            // Tier 1: Khớp chính xác hoàn hảo
+            for (let f of availableFiles) {
+                const fClean = cleanExtractFilename(f.name);
+                if (fClean.toLowerCase() === cleanReqLower) {
+                    return { matchedFile: f, matchType: 'exact', suggestion: null, score: 1.0 };
+                }
+            }
+
+            // Tier 2: Khớp tên gốc (BaseName) - cùng tên nhưng khác đuôi mở rộng
+            for (let f of availableFiles) {
+                const fBase = getFileBaseName(f.name).toLowerCase();
+                if (fBase === reqBaseName) {
+                    return { matchedFile: f, matchType: 'extension_variant', suggestion: null, score: 0.95 };
+                }
+            }
+
+            // Tier 3: Khớp Slug (bỏ qua dấu gạch dưới, gạch ngang, khoảng trắng, tiếng Việt)
+            for (let f of availableFiles) {
+                const fSlug = simplifySlug(f.name);
+                if (fSlug === reqSlug) {
+                    return { matchedFile: f, matchType: 'slug_match', suggestion: null, score: 0.90 };
+                }
+            }
+
+            // Tier 4: Fuzzy Matching gợi ý tệp tương đồng trong danh sách tệp chưa gán
+            let bestCandidate = null;
+            let highestScore = 0;
+
+            for (let f of availableFiles) {
+                const fClean = cleanExtractFilename(f.name);
+                const score = calculateStringSimilarity(cleanReq, fClean);
+                if (score > highestScore) {
+                    highestScore = score;
+                    bestCandidate = f;
+                }
+            }
+
+            if (bestCandidate && highestScore >= 0.55) {
+                return {
+                    matchedFile: null,
+                    matchType: 'fuzzy_suggestion',
+                    suggestion: bestCandidate,
+                    score: Math.round(highestScore * 100)
+                };
+            }
+
+            return { matchedFile: null, matchType: 'none', suggestion: null, score: 0 };
         }
 
         function parseSpintax(text) {
@@ -3632,7 +3646,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             const targetFolderId = document.getElementById('bulk-move-folder-select').value;
             if (!targetFolderId) return;
 
-            const selectedIds = [...selectedLibraryPostIds];
+            const selectedIds = [...document.querySelectorAll('.library-post-checkbox:checked')].map(cb => cb.value);
             if (!selectedIds.length) {
                 showToast('Vui lòng chọn ít nhất 1 bài viết để chuyển thư mục!', 'warning');
                 return;
@@ -3648,9 +3662,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             showToast(`Đã chuyển ${selectedIds.length} bài viết sang thư mục mới!`, 'success');
         }
 
-        async function downloadLocalMediaExcelTemplate() {
-            const xlsx = await getXlsxLibrary();
-            if (!xlsx) return;
+        function downloadLocalMediaExcelTemplate() {
             const templateData = [
                 {
                     "STT": 1,
@@ -3690,7 +3702,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 }
             ];
 
-            const wsPosts = xlsx.utils.json_to_sheet(templateData);
+            const wsPosts = XLSX.utils.json_to_sheet(templateData);
             wsPosts['!cols'] = [
                 { wch: 6 },
                 { wch: 18 },
@@ -3708,14 +3720,14 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 { "MỤC": "4. CÚ PHÁP SPINTAX", "HƯỚNG DẪN": "Sử dụng {Từ 1|Từ 2|Từ 3} để hệ thống tự động đảo câu chống Spam Facebook cực tốt." },
                 { "MỤC": "5. NÂNG CẤP V14.5 SMART MATCH", "HƯỚNG DẪN": "Nếu file trên ổ đĩa bị gõ sai đuôi hoặc thiếu ký tự, hệ thống sẽ tự động đề xuất gợi ý khớp (Fuzzy) và cho phép bạn chọn nhanh từ kho tệp đã nạp!" }
             ];
-            const wsGuide = xlsx.utils.json_to_sheet(guideData);
+            const wsGuide = XLSX.utils.json_to_sheet(guideData);
             wsGuide['!cols'] = [{ wch: 28 }, { wch: 85 }];
 
-            const wb = xlsx.utils.book_new();
-            xlsx.utils.book_append_sheet(wb, wsPosts, "KHO_PHOTO_VIDEO_LOCAL");
-            xlsx.utils.book_append_sheet(wb, wsGuide, "HUONG_DAN_CHI_TIET");
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, wsPosts, "KHO_PHOTO_VIDEO_LOCAL");
+            XLSX.utils.book_append_sheet(wb, wsGuide, "HUONG_DAN_CHI_TIET");
 
-            xlsx.writeFile(wb, "Mau_Excel_Import_Kho_Photo_Video_Tu_O_Dia.xlsx");
+            XLSX.writeFile(wb, "Mau_Excel_Import_Kho_Photo_Video_Tu_O_Dia.xlsx");
             showToast('Đã tải File Mẫu Excel Nhập Kho Từ Ổ Đĩa Máy Tính!', 'success');
         }
 
@@ -3781,24 +3793,21 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             }
         }
 
-        async function parseExcelFile(file) {
+        function parseExcelFile(file) {
             if (!file.name.match(/\.(xlsx|xls|csv)$/i)) {
                 showToast('Vui lòng chọn tệp Excel (.xlsx, .xls) hoặc .csv!', 'warning');
                 return;
             }
 
             document.getElementById('excel-file-name-label').innerText = `📄 ${file.name}`;
-            const xlsxPromise = getXlsxLibrary();
             const reader = new FileReader();
 
-            reader.onload = async function(evt) {
+            reader.onload = function(evt) {
                 try {
-                    const xlsx = await xlsxPromise;
-                    if (!xlsx) return;
                     const data = new Uint8Array(evt.target.result);
-                    const workbook = xlsx.read(data, { type: 'array' });
+                    const workbook = XLSX.read(data, { type: 'array' });
                     const sheetName = workbook.SheetNames[0];
-                    const rows = xlsx.utils.sheet_to_json(workbook.Sheets[sheetName]);
+                    const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
 
                     if (!rows || !rows.length) {
                         showToast('File Excel không có dữ liệu!', 'warning');
@@ -3908,7 +3917,6 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             }
 
             const assignedFileNames = new Set();
-            const fileMatchIndex = createFileMatchIndex(loadedLocalFilesList);
 
             stagedMatchedLibraryPosts = localExcelRowsParsed.map((item, idx) => {
                 // Nếu người dùng đã tự gán file thủ công trước đó thì giữ nguyên
@@ -3927,7 +3935,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     };
                 }
 
-                const evalRes = evaluateFileMatch(item.fileNameReq, loadedLocalFilesList, assignedFileNames, fileMatchIndex);
+                const evalRes = evaluateFileMatch(item.fileNameReq, loadedLocalFilesList, assignedFileNames);
                 if (evalRes.matchedFile) {
                     assignedFileNames.add(cleanExtractFilename(evalRes.matchedFile.name).toLowerCase());
                 }
@@ -4316,15 +4324,12 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         /**
          * 7. Xuất danh sách các tệp chưa tìm thấy ra file Excel để người dùng chuẩn bị
          */
-        async function exportMissingFilesExcel() {
+        function exportMissingFilesExcel() {
             const missingRows = stagedMatchedLibraryPosts.filter(item => item.mediaType !== 'post' && !item.matchedFile);
             if (!missingRows.length) {
                 showToast('Không có bài viết nào bị thiếu file!', 'success');
                 return;
             }
-
-            const xlsx = await getXlsxLibrary();
-            if (!xlsx) return;
 
             const data = missingRows.map(m => ({
                 "STT DÒNG": m.rowIdx,
@@ -4336,11 +4341,11 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 "NỘI DUNG CAPTION": m.content
             }));
 
-            const ws = xlsx.utils.json_to_sheet(data);
+            const ws = XLSX.utils.json_to_sheet(data);
             ws['!cols'] = [{ wch: 10 }, { wch: 18 }, { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 12 }, { wch: 50 }];
-            const wb = xlsx.utils.book_new();
-            xlsx.utils.book_append_sheet(wb, ws, "TEP_CHUA_TIM_THAY");
-            xlsx.writeFile(wb, `Danh_Sach_Tep_Chua_Tim_Thay_${new Date().toISOString().slice(0,10)}.xlsx`);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "TEP_CHUA_TIM_THAY");
+            XLSX.writeFile(wb, `Danh_Sach_Tep_Chua_Tim_Thay_${new Date().toISOString().slice(0,10)}.xlsx`);
 
             showToast(`Đã xuất danh sách ${missingRows.length} tệp chưa tìm thấy ra file Excel!`, 'success');
         }
@@ -5203,11 +5208,8 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             }).join('');
         }
 
-        async function exportBackupExcel() {
+        function exportBackupExcel() {
             if (!pagesList.length) { showToast('Không có Fanpage nào để xuất!', 'warning'); return; }
-            const xlsx = await getXlsxLibrary();
-            if (!xlsx) return;
-
             const data = pagesList.map(p => ({
                 "TÊN FANPAGE": p.name,
                 "PAGE ID": p.pageId,
@@ -5219,11 +5221,11 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 "TRẠNG THÁI": p.error ? "Lỗi Token" : "Hoạt động",
                 "CẬP NHẬT LẦN CUỐI": p.lastUpdated || "--"
             }));
-            const ws = xlsx.utils.json_to_sheet(data);
+            const ws = XLSX.utils.json_to_sheet(data);
             ws['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 60 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 }];
-            const wb = xlsx.utils.book_new();
-            xlsx.utils.book_append_sheet(wb, ws, "Backup_Fanpages");
-            xlsx.writeFile(wb, `Backup_Fanpages_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Backup_Fanpages");
+            XLSX.writeFile(wb, `Backup_Fanpages_${new Date().toISOString().slice(0, 10)}.xlsx`);
             showToast('Đã xuất file Excel backup thành công!', 'success');
         }
 
@@ -5274,35 +5276,27 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         }
 
         function toggleSelectAllPages(master) {
-            filteredPageIds.forEach(id => {
-                if (master.checked) selectedPageIds.add(id);
-                else selectedPageIds.delete(id);
-            });
-            document.querySelectorAll('#pages-table-body .page-row-checkbox').forEach(cb => cb.checked = master.checked);
+            document.querySelectorAll('.page-row-checkbox').forEach(cb => cb.checked = master.checked);
             updatePageSelectionState();
         }
 
         function selectVisiblePagesByCount() {
-            if (!filteredPageIds.length) {
+            const boxes = [...document.querySelectorAll('#pages-table-body .page-row-checkbox')];
+            if (!boxes.length) {
                 showToast('Không có Page nào trong danh sách đang hiển thị để chọn.', 'warning');
                 return;
             }
 
             const input = document.getElementById('page-select-count');
             const requestedCount = Math.max(1, Number.parseInt(input?.value, 10) || 1);
-            const selectedCount = Math.min(requestedCount, filteredPageIds.length);
-            selectedPageIds.clear();
-            filteredPageIds.slice(0, selectedCount).forEach(id => selectedPageIds.add(id));
-            document.querySelectorAll('#pages-table-body .page-row-checkbox').forEach(box => {
-                box.checked = selectedPageIds.has(String(box.value));
-            });
+            const selectedCount = Math.min(requestedCount, boxes.length);
+            boxes.forEach((box, index) => { box.checked = index < selectedCount; });
             if (input) input.value = String(selectedCount);
             updatePageSelectionState();
             showToast(`Đã chọn ${selectedCount} Page theo danh sách đang hiển thị.`, selectedCount < requestedCount ? 'warning' : 'success');
         }
 
         function clearPageSelection() {
-            selectedPageIds.clear();
             document.querySelectorAll('#pages-table-body .page-row-checkbox').forEach(box => { box.checked = false; });
             updatePageSelectionState();
             showToast('Đã bỏ chọn các Page trong danh sách đang hiển thị.', 'info');
@@ -5319,7 +5313,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             select.value = batches.some(batch => batch.key === currentValue) ? currentValue : '';
         }
         function assignSelectedPagesToBatch(targetBatch) {
-            const selectedIds = new Set(selectedPageIds);
+            const selectedIds = new Set([...document.querySelectorAll('.page-row-checkbox:checked')].map(cb => cb.value));
             if (!selectedIds.size) {
                 showToast('Vui lòng chọn ít nhất 1 Page trước khi chuyển lô!', 'warning');
                 return;
@@ -5375,25 +5369,21 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             assignSelectedPagesToBatch(targetBatch);
         }
 
-        function updatePageSelectionState(changedBox = null) {
-            if (changedBox) {
-                const id = String(changedBox.value);
-                if (changedBox.checked) selectedPageIds.add(id);
-                else selectedPageIds.delete(id);
-            }
-            const selectedCount = filteredPageIds.reduce((count, id) => count + (selectedPageIds.has(id) ? 1 : 0), 0);
+        function updatePageSelectionState() {
+            const allBoxes = [...document.querySelectorAll('.page-row-checkbox')];
+            const selectedBoxes = allBoxes.filter(cb => cb.checked);
             const masterCheckbox = document.getElementById('select-all-pages');
             if (masterCheckbox) {
-                masterCheckbox.checked = filteredPageIds.length > 0 && selectedCount === filteredPageIds.length;
-                masterCheckbox.indeterminate = selectedCount > 0 && selectedCount < filteredPageIds.length;
+                masterCheckbox.checked = allBoxes.length > 0 && selectedBoxes.length === allBoxes.length;
+                masterCheckbox.indeterminate = selectedBoxes.length > 0 && selectedBoxes.length < allBoxes.length;
             }
             populateBulkPageBatchTargets();
             const bulkBar = document.getElementById('bulk-delete-bar');
             const countLabel = document.getElementById('selected-pages-count');
 
             if (bulkBar && countLabel) {
-                if (selectedCount > 0) {
-                    countLabel.innerText = selectedCount;
+                if (selectedBoxes.length > 0) {
+                    countLabel.innerText = selectedBoxes.length;
                     bulkBar.classList.remove('hidden');
                     bulkBar.classList.add('flex');
                 } else {
@@ -5404,7 +5394,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         }
 
         function deleteSelectedPages() {
-            const selectedIds = [...selectedPageIds];
+            const selectedIds = [...document.querySelectorAll('.page-row-checkbox:checked')].map(cb => cb.value);
             if (!selectedIds.length) return;
 
             showConfirmDialog(
@@ -5552,8 +5542,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             mode: 'immediate'
         };
 
-        // Begin at DOMContentLoaded so optional assets do not delay initial application state.
-        function initializeApp() {
+        window.onload = function() {
             loadPagesFromStorage();
             loadScheduledQueueFromStorage();
             loadFoldersFromStorage();
@@ -5565,9 +5554,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             updateSyncCycleUI();
             startSchedulerCron();
             initDefaultMatrixDates();
-        }
-        if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initializeApp, { once: true });
-        else initializeApp();
+        };
 
         function showToast(message, type = 'info') {
             const container = document.getElementById('toast-container');
@@ -5877,14 +5864,11 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             if (logsBox) logsBox.innerHTML = '<div class="text-slate-500 italic">[SYSTEM] Terminal logs đã được dọn dẹp.</div>';
         }
 
-        async function exportProgressReportExcel() {
+        function exportProgressReportExcel() {
             if (!progressEngineState.executionReport.length) {
                 showToast('Chưa có lịch sử báo cáo thực thi bài đăng!', 'warning');
                 return;
             }
-
-            const xlsx = await getXlsxLibrary();
-            if (!xlsx) return;
 
             const data = progressEngineState.executionReport.map(r => ({
                 "THỜI GIAN": r.time,
@@ -5896,11 +5880,11 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 "NỘI DUNG CAPTION": r.content
             }));
 
-            const ws = xlsx.utils.json_to_sheet(data);
+            const ws = XLSX.utils.json_to_sheet(data);
             ws['!cols'] = [{ wch: 18 }, { wch: 25 }, { wch: 18 }, { wch: 10 }, { wch: 12 }, { wch: 30 }, { wch: 50 }];
-            const wb = xlsx.utils.book_new();
-            xlsx.utils.book_append_sheet(wb, ws, "Bao_Cao_Dang_Bai");
-            xlsx.writeFile(wb, `Bao_Cao_Execution_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Bao_Cao_Dang_Bai");
+            XLSX.writeFile(wb, `Bao_Cao_Execution_${new Date().toISOString().slice(0, 10)}.xlsx`);
             showToast('Đã xuất Báo Cáo Tiến Trình Đăng Bài ra file Excel!', 'success');
         }
 
@@ -5916,7 +5900,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             document.getElementById('prog-stat-percent').innerText = `${percent}%`;
 
             const barFill = document.getElementById('prog-bar-fill');
-            barFill.style.transform = `scaleX(${percent / 100})`;
+            barFill.style.width = `${percent}%`;
 
             const spinnerIcon = document.getElementById('prog-spinner-icon');
             const titleLabel = document.getElementById('prog-title-label');
@@ -6929,14 +6913,11 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             showToast(`Đã lưu ${added} bài viết vào Thư Mục Kho!`, 'success');
         }
 
-        async function exportFetchedPostsExcel() {
+        function exportFetchedPostsExcel() {
             if (!fetchedPostsResult.length) {
                 showToast('Chưa có bài viết nào để xuất Excel!', 'warning');
                 return;
             }
-
-            const xlsx = await getXlsxLibrary();
-            if (!xlsx) return;
 
             const excelData = fetchedPostsResult.map(p => ({
                 "POST ID": p.id,
@@ -6948,14 +6929,14 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 "LINK BÀI FB": p.permalink_url
             }));
 
-            const worksheet = xlsx.utils.json_to_sheet(excelData);
+            const worksheet = XLSX.utils.json_to_sheet(excelData);
             worksheet['!cols'] = [
                 { wch: 22 }, { wch: 20 }, { wch: 60 }, { wch: 15 }, { wch: 15 }, { wch: 40 }, { wch: 40 }
             ];
 
-            const workbook = xlsx.utils.book_new();
-            xlsx.utils.book_append_sheet(workbook, worksheet, "Bai_Viet_Cao_Ve");
-            xlsx.writeFile(workbook, `Facebook_Page_Posts_${new Date().toISOString().slice(0, 10)}.xlsx`);
+            const workbook = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(workbook, worksheet, "Bai_Viet_Cao_Ve");
+            XLSX.writeFile(workbook, `Facebook_Page_Posts_${new Date().toISOString().slice(0, 10)}.xlsx`);
             showToast(`Đã xuất ${fetchedPostsResult.length} bài viết ra Excel!`, 'success');
         }
 
@@ -7640,7 +7621,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                 return;
             }
 
-            const checkedIds = [...selectedPageIds];
+            const checkedIds = [...document.querySelectorAll('.page-row-checkbox:checked')].map(cb => String(cb.value));
             bulkAvatarSelectedPageIds = new Set(checkedIds.filter(id => pagesList.some(page => String(page.id) === id && page.token)));
             const countInput = document.getElementById('bulk-avatar-page-count');
             countInput.min = '1';
@@ -7937,10 +7918,10 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
         function updateBulkAvatarProgress(done, total, pageName, successCount, failedCount) {
             const percentage = total ? Math.round((done / total) * 100) : 0;
             document.getElementById('bulk-avatar-progress-count').textContent = `${done} / ${total} · ${successCount} thành công · ${failedCount} lỗi`;
-            document.getElementById('bulk-avatar-progress-fill').style.transform = `scaleX(${percentage / 100})`;
+            document.getElementById('bulk-avatar-progress-fill').style.width = `${percentage}%`;
             document.getElementById('bulk-avatar-current-page').textContent = pageName ? `Đang xử lý: ${pageName}` : '';
             document.getElementById('bulk-avatar-background-count').textContent = `${done} / ${total} Page · ${successCount} thành công · ${failedCount} lỗi`;
-            document.getElementById('bulk-avatar-background-fill').style.transform = `scaleX(${percentage / 100})`;
+            document.getElementById('bulk-avatar-background-fill').style.width = `${percentage}%`;
             if (bulkAvatarRunning) {
                 document.getElementById('bulk-avatar-background-label').textContent = pageName ? `Đang cập nhật: ${pageName}` : 'Đang cập nhật ảnh đại diện...';
                 if (document.getElementById('bulk-avatar-modal').classList.contains('hidden')) {
@@ -8063,49 +8044,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             showToast(`Đã xử lý ${targets.length} Page: ${successCount} thành công, ${failedCount} lỗi.`, failedCount ? (successCount ? 'warning' : 'error') : 'success');
         }
 
-        let selectedPageIds = new Set();
-        let filteredPageIds = [];
-        let pageTableCurrentPage = 0;
-        let pageTablePageSize = 100;
         let pageSearchRenderTimer = null;
-
-        function updatePagePagination(totalRows) {
-            const controls = document.getElementById('pages-pagination');
-            const summary = document.getElementById('page-pagination-summary');
-            const pageLabel = document.getElementById('page-pagination-page-label');
-            const previousButton = document.getElementById('page-pagination-prev');
-            const nextButton = document.getElementById('page-pagination-next');
-            const pageCount = Math.ceil(totalRows / pageTablePageSize);
-            const firstRow = totalRows ? pageTableCurrentPage * pageTablePageSize + 1 : 0;
-            const lastRow = Math.min(totalRows, (pageTableCurrentPage + 1) * pageTablePageSize);
-            if (summary) summary.textContent = totalRows
-                ? 'Đang xem ' + firstRow + '–' + lastRow + ' / ' + totalRows + ' Page'
-                : '0 Page';
-            if (pageLabel) pageLabel.textContent = totalRows
-                ? (pageTableCurrentPage + 1) + ' / ' + pageCount
-                : '0 / 0';
-            if (previousButton) previousButton.disabled = !totalRows || pageTableCurrentPage <= 0;
-            if (nextButton) nextButton.disabled = !totalRows || pageTableCurrentPage >= pageCount - 1;
-            if (controls) controls.classList.toggle('hidden', !totalRows);
-        }
-
-        function changePageTablePage(offset) {
-            const pageCount = Math.ceil(filteredPageIds.length / pageTablePageSize);
-            pageTableCurrentPage = Math.max(0, Math.min(pageCount - 1, pageTableCurrentPage + offset));
-            const scroll = document.getElementById('pages-table-scroll');
-            if (scroll) scroll.scrollTop = 0;
-            renderPages(true);
-        }
-
-        function changePageTableSize(value) {
-            const nextSize = Number.parseInt(value, 10);
-            if (![50, 100, 200].includes(nextSize)) return;
-            pageTablePageSize = nextSize;
-            pageTableCurrentPage = 0;
-            const scroll = document.getElementById('pages-table-scroll');
-            if (scroll) scroll.scrollTop = 0;
-            renderPages(true);
-        }
 
         function schedulePageRender() {
             clearTimeout(pageSearchRenderTimer);
@@ -8115,11 +8054,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             }, 180);
         }
 
-        function renderPages(preservePaginationAndSelection = false) {
-            if (!preservePaginationAndSelection) {
-                pageTableCurrentPage = 0;
-                selectedPageIds.clear();
-            }
+        function renderPages() {
             const tbody = document.getElementById('pages-table-body');
             const emptyState = document.getElementById('empty-state');
             const badge = document.getElementById('page-count-badge');
@@ -8726,12 +8661,12 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
             };
         }
 
-        function extractPageRowsFromWorkbook(workbook, xlsx = window.XLSX) {
+        function extractPageRowsFromWorkbook(workbook) {
             const imported = [];
             (workbook.SheetNames || []).forEach(sheetName => {
                 const sheet = workbook.Sheets[sheetName];
                 if (!sheet) return;
-                const grid = xlsx.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+                const grid = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
                 if (!grid.length) return;
                 let headerIndex = -1;
                 let columns = null;
@@ -8775,11 +8710,10 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     const text = (await file.text()).replace(/^\uFEFF/, '');
                     rows = parseManualPageRows(text);
                 } else if (['.xlsx', '.xls', '.csv'].includes(extension)) {
-                    const xlsx = await getXlsxLibrary();
-                    if (!xlsx) return;
+                    if (!window.XLSX) throw new Error('Thư viện đọc Excel chưa tải xong. Vui lòng thử lại sau.');
                     const buffer = await file.arrayBuffer();
-                    const workbook = xlsx.read(buffer, { type: 'array', raw: false });
-                    rows = extractPageRowsFromWorkbook(workbook, xlsx);
+                    const workbook = XLSX.read(buffer, { type: 'array', raw: false });
+                    rows = extractPageRowsFromWorkbook(workbook);
                 } else {
                     throw new Error('Định dạng file chưa được hỗ trợ. Hãy chọn .TXT, .XLSX, .XLS hoặc .CSV.');
                 }
@@ -8985,7 +8919,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
                 return;
             }
 
-            const selectedIds = new Set([...selectedLibraryPostIds]);
+            const selectedIds = new Set([...document.querySelectorAll('.library-post-checkbox:checked')].map(cb => cb.value));
             const shuffledItems = visiblePositions.map(index => postLibrary[index]);
             for (let i = shuffledItems.length - 1; i > 0; i--) {
                 const j = Math.floor(Math.random() * (i + 1));
@@ -9021,29 +8955,11 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             const tbody = document.getElementById('post-library-table-body');
             const targetPagesList = document.getElementById('library-target-pages-list');
             const filtered = postLibrary.filter(isLibraryPostVisibleInCurrentFilters);
-            const filteredSignature = JSON.stringify(filtered.map(item => String(item.id)).sort());
-            if (filteredSignature !== libraryFilterSignature) { libraryFilterSignature = filteredSignature; libraryPage = 0; selectedLibraryPostIds.clear(); }
-            const existingPostIds = new Set(postLibrary.map(item => String(item.id)));
-            for (const id of selectedLibraryPostIds) if (!existingPostIds.has(id)) selectedLibraryPostIds.delete(id);
-            libraryCurrentFilteredIds = filtered.map(item => String(item.id));
-            const pageCount = Math.max(1, Math.ceil(filtered.length / libraryPageSize));
-            libraryPage = Math.min(libraryPage, pageCount - 1);
-            const libraryPageStart = libraryPage * libraryPageSize;
-            const visiblePosts = filtered.slice(libraryPageStart, libraryPageStart + libraryPageSize);
-            const pagination = document.getElementById('library-post-pagination');
-            if (pagination) {
-                pagination.classList.toggle('hidden', filtered.length <= libraryPageSize);
-                pagination.classList.toggle('flex', filtered.length > libraryPageSize);
-                document.getElementById('library-post-pagination-summary').textContent = filtered.length ? 'Đang xem ' + (libraryPageStart + 1) + '–' + Math.min(libraryPageStart + libraryPageSize, filtered.length) + ' / ' + filtered.length + ' bài' : '0 bài';
-                document.getElementById('library-post-pagination-label').textContent = (libraryPage + 1) + ' / ' + pageCount;
-                pagination.querySelector('button:first-of-type').disabled = libraryPage <= 0;
-                pagination.querySelector('button:last-of-type').disabled = libraryPage >= pageCount - 1;
-            }
 
             if (!filtered.length) {
                 tbody.innerHTML = '<tr><td colspan="6" class="p-8 text-center text-slate-500">Thư mục này chưa có bài viết nào phù hợp.</td></tr>';
             } else {
-                tbody.innerHTML = visiblePosts.map((item, idx) => {
+                tbody.innerHTML = filtered.map((item, idx) => {
                     const badge = item.mediaType === 'photo' ? '<span class="px-2 py-0.5 bg-blue-500/20 text-blue-300 rounded font-bold text-[10px]">PHOTO</span>' :
                                   item.mediaType === 'video' ? '<span class="px-2 py-0.5 bg-rose-500/20 text-rose-300 rounded font-bold text-[10px]">VIDEO</span>' :
                                   item.mediaType === 'reel' ? '<span class="px-2 py-0.5 bg-amber-500/20 text-amber-300 rounded font-bold text-[10px]">REEL</span>' :
@@ -9087,9 +9003,9 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
 
                     return `
                         <tr class="hover:bg-slate-900 transition">
-                            <td class="p-2.5 text-center font-bold text-slate-500">${libraryPageStart + idx + 1}</td>
+                            <td class="p-2.5 text-center font-bold text-slate-500">${idx + 1}</td>
                             <td class="p-2.5 text-center">
-                                <input type="checkbox" value="${item.id}" ${selectedLibraryPostIds.has(String(item.id)) ? 'checked' : ''} onchange="toggleLibraryPostSelection(this)" class="library-post-checkbox accent-teal-500 w-4 h-4 rounded cursor-pointer">
+                                <input type="checkbox" value="${item.id}" onchange="updateLibrarySelectionCount()" class="library-post-checkbox accent-teal-500 w-4 h-4 rounded cursor-pointer">
                             </td>
                             <td class="p-2.5">
                                 <div class="font-bold text-white max-w-xs truncate" title="${escapeHtml(item.content)}">${escapeHtml(item.content)}</div>
@@ -9114,54 +9030,30 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             }
 
             if (targetPagesList) {
-                const pageSignature = JSON.stringify(pagesList.map(page => [String(page.id), page.name]));
-                if (pageSignature !== libraryTargetPageSignature) {
-                    const previousSelection = new Map([...targetPagesList.querySelectorAll('.lib-target-page-checkbox')].map(cb => [String(cb.value), cb.checked]));
-                    targetPagesList.innerHTML = pagesList.length ? pagesList.map(p => `
+                targetPagesList.innerHTML = pagesList.length ? pagesList.map(p => `
                     <label class="flex items-center justify-between p-1.5 rounded-lg bg-slate-950 hover:bg-slate-800 transition cursor-pointer text-xs">
                         <div class="flex items-center gap-2 min-w-0">
-                            <input type="checkbox" value="${p.id}" class="lib-target-page-checkbox accent-purple-500 w-3.5 h-3.5 rounded cursor-pointer" ${previousSelection.has(String(p.id)) ? (previousSelection.get(String(p.id)) ? 'checked' : '') : 'checked'}>
+                            <input type="checkbox" value="${p.id}" class="lib-target-page-checkbox accent-purple-500 w-3.5 h-3.5 rounded cursor-pointer" checked>
                             <span class="font-bold text-slate-200 truncate">${escapeHtml(p.name)}</span>
                         </div>
                     </label>
                 `).join('') : '<div class="text-slate-500 text-xs">Chưa có Fanpage</div>';
-                    libraryTargetPageSignature = pageSignature;
-                }
             }
 
-            updateLibrarySelectionCount();
-        }
-
-        function changeLibraryPage(direction) {
-            const pageCount = Math.max(1, Math.ceil(libraryCurrentFilteredIds.length / libraryPageSize));
-            libraryPage = Math.max(0, Math.min(pageCount - 1, libraryPage + direction));
-            renderPostLibraryTable();
-        }
-
-        function toggleLibraryPostSelection(checkbox) {
-            const id = String(checkbox.value);
-            if (checkbox.checked) selectedLibraryPostIds.add(id); else selectedLibraryPostIds.delete(id);
             updateLibrarySelectionCount();
         }
 
         function toggleSelectAllLibrary(master) {
-            postLibrary.filter(isLibraryPostVisibleInCurrentFilters).forEach(item => {
-                const id = String(item.id);
-                if (master.checked) selectedLibraryPostIds.add(id); else selectedLibraryPostIds.delete(id);
-            });
-            renderPostLibraryTable();
+            document.querySelectorAll('.library-post-checkbox').forEach(cb => cb.checked = master.checked);
+            updateLibrarySelectionCount();
         }
 
         function updateLibrarySelectionCount() {
+            const selected = document.querySelectorAll('.library-post-checkbox:checked').length;
             const countLabel = document.getElementById('library-selected-count');
-            if (countLabel) countLabel.innerText = '(' + selectedLibraryPostIds.size + ' chọn)';
-            const master = document.getElementById('select-all-library');
-            if (master) {
-                const selectedVisible = libraryCurrentFilteredIds.reduce((count, id) => count + (selectedLibraryPostIds.has(id) ? 1 : 0), 0);
-                master.checked = libraryCurrentFilteredIds.length > 0 && selectedVisible === libraryCurrentFilteredIds.length;
-                master.indeterminate = selectedVisible > 0 && selectedVisible < libraryCurrentFilteredIds.length;
-            }
+            if (countLabel) countLabel.innerText = `(${selected} chọn)`;
         }
+
         function selectAllLibraryPages(checked) {
             document.querySelectorAll('.lib-target-page-checkbox').forEach(cb => cb.checked = checked);
         }
@@ -9382,7 +9274,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         async function deleteSelectedLibraryPosts() {
-            const selectedIds = [...selectedLibraryPostIds];
+            const selectedIds = [...document.querySelectorAll('.library-post-checkbox:checked')].map(cb => cb.value);
             if (!selectedIds.length) return;
 
             showConfirmDialog('Xóa nhiều bài viết Kho', `Bạn có chắc chắn muốn xóa ${selectedIds.length} bài viết đã chọn?`, async () => {
@@ -9402,7 +9294,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         function useSelectedLibraryPostsForPublish(mode) {
-            const selectedIds = [...selectedLibraryPostIds];
+            const selectedIds = [...document.querySelectorAll('.library-post-checkbox:checked')].map(cb => cb.value);
             if (!selectedIds.length) {
                 showToast('Vui lòng chọn ít nhất 1 bài viết trong Kho!', 'warning');
                 return;
@@ -9417,7 +9309,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
         }
 
         function generateMatrixScheduleFromLibrary(mode = 'sequential') {
-            const selectedIds = [...selectedLibraryPostIds];
+            const selectedIds = [...document.querySelectorAll('.library-post-checkbox:checked')].map(cb => cb.value);
             const items = postLibrary.filter(p => selectedIds.includes(p.id));
 
 
@@ -9502,7 +9394,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             select.innerHTML = pagesList.map(p => `<option value="${p.id}" ${p.id === pageLocalId ? 'selected' : ''}>${escapeHtml(p.name)} (${p.pageId})</option>`).join('');
             
             document.getElementById('follower-analytics-modal').classList.remove('hidden');
-            renderFollowerAnalytics().catch(error => showToast(error.message || 'Không tải được biểu đồ.', 'error'));
+            renderFollowerAnalytics();
         }
 
         function closeFollowerAnalyticsModal() {
@@ -9514,11 +9406,10 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             document.getElementById('chart-btn-both').className = metric === 'both' ? 'px-2 py-0.5 text-[10px] font-bold rounded bg-blue-600 text-white' : 'px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white';
             document.getElementById('chart-btn-followers').className = metric === 'followers' ? 'px-2 py-0.5 text-[10px] font-bold rounded bg-blue-600 text-white' : 'px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white';
             document.getElementById('chart-btn-likes').className = metric === 'likes' ? 'px-2 py-0.5 text-[10px] font-bold rounded bg-blue-600 text-white' : 'px-2 py-0.5 text-[10px] font-medium text-slate-400 hover:text-white';
-            renderFollowerAnalytics().catch(error => showToast(error.message || 'Không tải được biểu đồ.', 'error'));
+            renderFollowerAnalytics();
         }
 
-        async function renderFollowerAnalytics() {
-            const ChartConstructor = await ensureChartLoaded();
+        function renderFollowerAnalytics() {
             const pageLocalId = document.getElementById('analytics-page-select').value;
             const pageObj = pagesList.find(p => p.id === pageLocalId);
             if (!pageObj) return;
@@ -9614,7 +9505,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
                 });
             }
 
-            followerChartInstance = new ChartConstructor(ctx, {
+            followerChartInstance = new Chart(ctx, {
                 type: 'line',
                 data: { labels, datasets },
                 options: {
@@ -9633,7 +9524,7 @@ Hãy trả về định dạng JSON thuần túy theo mảng các chuỗi bài v
             const pageLocalId = document.getElementById('analytics-page-select').value;
             delete followerHistoryLogs[pageLocalId];
             saveFollowerHistoryToStorage();
-            renderFollowerAnalytics().catch(error => showToast(error.message || 'Không tải được biểu đồ.', 'error'));
+            renderFollowerAnalytics();
             showToast('Đã dọn dẹp lịch sử snapshot cho Fanpage này!', 'info');
         }
 
