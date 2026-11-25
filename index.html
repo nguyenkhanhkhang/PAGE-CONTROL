@@ -2326,6 +2326,11 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                     <strong>Tự động phân tách Page Token chuẩn xác:</strong> Nhập User / App Token. Hệ thống sẽ tự gọi API <code class="bg-slate-950 px-1 py-0.5 rounded font-mono text-emerald-300">/me/accounts</code> và lấy danh sách Page.
                 </div>
                 <div>
+                    <label class="block text-slate-300 font-semibold mb-1">Tên BM (ghi chú cố định cho các Page được nhập):</label>
+                    <input id="import-token-bm-name" type="text" maxlength="120" placeholder="Ví dụ: BM Thương hiệu ABC" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500">
+                    <p class="text-[10px] text-slate-500 mt-1">Tên BM được lưu trên Page khi import và không tự thay đổi khi đồng bộ.</p>
+                </div>
+                <div>
                     <label class="block text-slate-300 font-semibold mb-1">Tên lô Page cho lần import này:</label>
                     <input id="import-token-batch-name" type="text" maxlength="80" placeholder="Ví dụ: Lô Page cửa hàng miền Bắc" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500">
                     <p class="text-[10px] text-slate-500 mt-1">Các Page được lưu từ lần quét này sẽ cùng thuộc lô.</p>
@@ -2364,7 +2369,12 @@ EAAG..."
             </div>
 
             <div id="import-tab-manual" class="space-y-4 text-xs hidden">
-                <p class="text-xs text-slate-400">Mỗi dòng theo định dạng <code class="bg-slate-950 px-1.5 py-0.5 rounded text-emerald-300 font-mono">Tên Page | Page ID | Token</code>. Có thể tải file Text hoặc Excel; Excel nhận diện các cột Tên Fanpage, Page ID, Page Access Token.</p>
+                <p class="text-xs text-slate-400">Mỗi dòng theo định dạng <code class="bg-slate-950 px-1.5 py-0.5 rounded text-emerald-300 font-mono">Tên Page | Page ID | Token | Tên BM</code>. Cột Tên BM là tùy chọn; nếu bỏ trống, hệ thống dùng Tên BM ở ô bên trên. Có thể tải file Text hoặc Excel.</p>
+                <div>
+                    <label class="block text-slate-300 font-semibold mb-1">Tên BM (ghi chú cố định cho các Page được nhập):</label>
+                    <input id="import-manual-bm-name" type="text" maxlength="120" placeholder="Ví dụ: BM Thương hiệu ABC" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500">
+                    <p class="text-[10px] text-slate-500 mt-1">Tên BM được lưu trên Page khi import và không tự thay đổi khi đồng bộ. Có thể khai báo riêng ở cột thứ 4 trong danh sách.</p>
+                </div>
                 <div>
                     <label class="block text-slate-300 font-semibold mb-1">Tên lô Page cho lần import này:</label>
                     <input id="import-manual-batch-name" type="text" maxlength="80" placeholder="Ví dụ: Lô Page cửa hàng miền Bắc" class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-slate-100 focus:outline-none focus:border-emerald-500">
@@ -2384,8 +2394,8 @@ EAAG..."
                     <div id="import-pages-file-status" aria-live="polite" class="text-[10px] text-slate-500 mt-2">Chưa chọn file. Nội dung file sẽ được nạp vào ô bên dưới để xem lại trước khi import.</div>
                 </div>
                 <textarea id="import-pages-data" rows="7"
-                    placeholder="Page Thời Trang | 100000000000001 | EAAB...
-Page Mỹ Phẩm | 100000000000002 | EAAB..."
+                    placeholder="Page Thời Trang | 100000000000001 | EAAB... | BM Thương hiệu ABC
+Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                     class="w-full bg-slate-950 border border-slate-800 rounded-xl p-3.5 text-slate-100 focus:outline-none focus:border-emerald-500 font-mono text-xs leading-relaxed"></textarea>
                 <div class="flex gap-2.5 pt-2">
                     <button onclick="closeImportModal()" class="w-1/2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2.5 rounded-xl transition">Đóng</button>
@@ -5214,6 +5224,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 "TÊN FANPAGE": p.name,
                 "PAGE ID": p.pageId,
                 "PAGE ACCESS TOKEN": p.token,
+                "TÊN BM": p.bmName || '',
                 "TỔNG FOLLOWER": p.currentFollowers || 0,
                 "LIKES HÔM NAY": p.postLikesToday || 0,
                 "LIKES TUẦN NÀY": p.postLikesWeek || 0,
@@ -5222,7 +5233,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 "CẬP NHẬT LẦN CUỐI": p.lastUpdated || "--"
             }));
             const ws = XLSX.utils.json_to_sheet(data);
-            ws['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 60 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 }];
+            ws['!cols'] = [{ wch: 30 }, { wch: 20 }, { wch: 60 }, { wch: 30 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 }];
             const wb = XLSX.utils.book_new();
             XLSX.utils.book_append_sheet(wb, ws, "Backup_Fanpages");
             XLSX.writeFile(wb, `Backup_Fanpages_${new Date().toISOString().slice(0, 10)}.xlsx`);
@@ -5231,7 +5242,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
         function exportBackupText() {
             if (!pagesList.length) { showToast('Không có Fanpage nào để xuất!', 'warning'); return; }
-            const txt = pagesList.map(p => `${p.name} | ${p.pageId} | ${p.token}`).join('\n');
+            const txt = pagesList.map(p => `${p.name} | ${p.pageId} | ${p.token} | ${p.bmName || ''}`).join('\n');
             const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
@@ -5261,7 +5272,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
         function copyBackupToClipboard() {
             if (!pagesList.length) { showToast('Không có Fanpage nào để sao chép!', 'warning'); return; }
-            const txt = pagesList.map(p => `${p.name} | ${p.pageId} | ${p.token}`).join('\n');
+            const txt = pagesList.map(p => `${p.name} | ${p.pageId} | ${p.token} | ${p.bmName || ''}`).join('\n');
             const textArea = document.createElement('textarea');
             textArea.value = txt;
             document.body.appendChild(textArea);
@@ -8071,7 +8082,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
             let filtered = pagesList.filter(p => {
                 if (batchFilter !== 'all' && getPageImportBatchKey(p) !== batchFilter) return false;
-                const matchSearch = p.name.toLowerCase().includes(searchVal) || p.pageId.includes(searchVal);
+                const matchSearch = p.name.toLowerCase().includes(searchVal) || p.pageId.includes(searchVal) || String(p.bmName || '').toLowerCase().includes(searchVal);
                 if (!matchSearch) return false;
 
                 if (statusFilter === 'online' && p.error) return false;
@@ -8160,6 +8171,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                                     <a href="https://facebook.com/${p.pageId}" target="_blank" class="font-bold text-white text-xs hover:text-blue-400 transition truncate block">${escapeHtml(p.name)}</a>
                                     <span class="text-[10px] text-slate-500 font-mono">ID: ${p.pageId}</span>
                                     <span class="text-[9px] text-indigo-300 truncate block mt-0.5">Lô: ${escapeHtml(p.importBatchName || 'Page chưa phân lô')}</span>
+                                    <span class="text-[9px] text-cyan-300 truncate block mt-0.5" title="Tên BM được lưu cố định khi nhập">Tên BM: ${escapeHtml(p.bmName || 'Chưa gán')}</span>
                                 </div>
                             </div>
                         </td>
@@ -8580,6 +8592,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
 
             let added = 0;
             const importBatch = createPageImportBatch('import-token-batch-name');
+            const bmName = String(document.getElementById('import-token-bm-name')?.value || '').trim();
             selected.forEach(p => {
                 const exist = pagesList.find(x => x.pageId === p.pageId);
                 if (!exist) {
@@ -8588,6 +8601,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         name: p.name,
                         pageId: p.pageId,
                         token: p.token,
+                        bmName: bmName,
                         addedAt: Date.now(),
                         avatarChangeStatus: 'pending',
                         importBatchId: importBatch.id,
@@ -8638,17 +8652,23 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
         }
 
         function parseManualPageRows(raw) {
-            const nameHeaders = new Set(['ten fanpage', 'ten page', 'page name', 'fanpage name', 'name', 'fanpage']);
-            const idHeaders = new Set(['page id', 'id page', 'facebook page id', 'id fanpage', 'id']);
-            const tokenHeaders = new Set(['page access token', 'access token', 'page token', 'token']);
-            return String(raw || '').replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).map(line => {
+            const rows = [];
+            let columns = null;
+            String(raw || '').replace(/^\uFEFF/, '').split(/\r?\n/).map(line => line.trim()).filter(line => line && !line.startsWith('#')).forEach(line => {
                 const parts = splitPageImportLine(line).map(value => String(value ?? '').trim());
-                if (parts.length < 3) return null;
-                const headers = parts.map(normalizePageImportHeader);
-                if (headers.some(value => nameHeaders.has(value)) && headers.some(value => idHeaders.has(value)) && headers.some(value => tokenHeaders.has(value))) return null;
-                const [name, pageId, token] = parts;
-                return name && pageId && token ? { name, pageId, token } : null;
-            }).filter(Boolean);
+                if (parts.length < 3) return;
+                const candidate = getPageImportColumns(parts);
+                if (candidate.name >= 0 && candidate.pageId >= 0 && candidate.token >= 0) {
+                    columns = candidate;
+                    return;
+                }
+                const name = String(parts[columns?.name >= 0 ? columns.name : 0] || '').trim();
+                const pageId = String(parts[columns?.pageId >= 0 ? columns.pageId : 1] || '').trim();
+                const token = String(parts[columns?.token >= 0 ? columns.token : 2] || '').trim();
+                const bmName = String(parts[columns?.bmName >= 0 ? columns.bmName : 3] || '').trim();
+                if (name && pageId && token) rows.push({ name, pageId, token, bmName });
+            });
+            return rows;
         }
 
         function getPageImportColumns(headerRow) {
@@ -8657,7 +8677,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             return {
                 name: find(['ten fanpage', 'ten page', 'page name', 'fanpage name', 'name', 'fanpage']),
                 pageId: find(['page id', 'id page', 'facebook page id', 'id fanpage', 'id']),
-                token: find(['page access token', 'access token', 'page token', 'token'])
+                token: find(['page access token', 'access token', 'page token', 'token']),
+                bmName: find(['ten bm', 'bm name', 'business manager', 'ten business manager', 'bm'])
             };
         }
 
@@ -8678,14 +8699,15 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                         break;
                     }
                 }
-                if (headerIndex < 0) columns = { name: 0, pageId: 1, token: 2 };
+                if (headerIndex < 0) columns = { name: 0, pageId: 1, token: 2, bmName: 3 };
                 const startIndex = headerIndex >= 0 ? headerIndex + 1 : 0;
                 for (let i = startIndex; i < grid.length; i++) {
                     const row = grid[i] || [];
                     const name = String(row[columns.name >= 0 ? columns.name : 0] ?? '').trim();
                     const pageId = String(row[columns.pageId] ?? '').trim();
                     const token = String(row[columns.token] ?? '').trim();
-                    if (name && pageId && token) imported.push({ name, pageId, token });
+                    const bmName = String(row[columns.bmName >= 0 ? columns.bmName : 3] ?? '').trim();
+                    if (name && pageId && token) imported.push({ name, pageId, token, bmName });
                 }
             });
             return imported;
@@ -8717,7 +8739,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
                 } else {
                     throw new Error('Định dạng file chưa được hỗ trợ. Hãy chọn .TXT, .XLSX, .XLS hoặc .CSV.');
                 }
-                input.value = rows.map(row => row.name + ' | ' + row.pageId + ' | ' + row.token).join('\n');
+                input.value = rows.map(row => [row.name, row.pageId, row.token, row.bmName || ''].join(' | ')).join('\n');
                 setImportPageFileStatus('Đã nạp ' + file.name + ': nhận diện ' + rows.length + ' dòng hợp lệ. Hãy kiểm tra nội dung rồi bấm “Thực Hiện Import Manual”.');
                 if (!rows.length) showToast('Chưa tìm thấy dòng hợp lệ. Kiểm tra định dạng Tên Page | Page ID | Token hoặc các cột Excel.', 'warning');
             } catch (error) {
@@ -8733,36 +8755,35 @@ Page Mỹ Phẩm | 100000000000002 | EAAB..."
             const raw = document.getElementById('import-pages-data').value.trim();
             if (!raw) { showToast('Vui lòng nhập danh sách Fanpage!', 'warning'); return; }
 
-            const lines = raw.split('\n');
+            const importedRows = parseManualPageRows(raw);
+            if (!importedRows.length) {
+                showToast('Không tìm thấy dòng hợp lệ. Dùng định dạng Tên Page | Page ID | Token | Tên BM.', 'warning');
+                return;
+            }
             let added = 0;
             const importBatch = createPageImportBatch('import-manual-batch-name');
+            const defaultBmName = String(document.getElementById('import-manual-bm-name')?.value || '').trim();
 
-            lines.forEach(line => {
-                const parts = line.split('|').map(s => s.trim());
-                if (parts.length >= 3) {
-                    const name = parts[0];
-                    const pageId = parts[1];
-                    const token = parts[2];
-
-                    if (name && pageId && token && !pagesList.some(p => p.pageId === pageId)) {
-                        pagesList.push({
-                            id: 'page_' + Date.now() + '_' + Math.random().toString(36).substring(2,6),
-                            name: name,
-                            pageId: pageId,
-                            token: token,
-                            addedAt: Date.now(),
-                            avatarChangeStatus: 'pending',
-                            importBatchId: importBatch.id,
-                            importBatchName: importBatch.name,
-                            currentFollowers: 0,
-                            postLikesToday: 0,
-                            postLikesWeek: 0,
-                            postLikesMonth: 0,
-                            lastUpdated: 'Vừa import',
-                            error: false
-                        });
-                        added++;
-                    }
+            importedRows.forEach(row => {
+                if (row.name && row.pageId && row.token && !pagesList.some(p => p.pageId === row.pageId)) {
+                    pagesList.push({
+                        id: 'page_' + Date.now() + '_' + Math.random().toString(36).substring(2,6),
+                        name: row.name,
+                        pageId: row.pageId,
+                        token: row.token,
+                        bmName: row.bmName || defaultBmName,
+                        addedAt: Date.now(),
+                        avatarChangeStatus: 'pending',
+                        importBatchId: importBatch.id,
+                        importBatchName: importBatch.name,
+                        currentFollowers: 0,
+                        postLikesToday: 0,
+                        postLikesWeek: 0,
+                        postLikesMonth: 0,
+                        lastUpdated: 'Vừa import',
+                        error: false
+                    });
+                    added++;
                 }
             });
 
