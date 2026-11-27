@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fanpage Control Center · V14.5 Pro Smart Disk Auto-Match & Matrix Publisher</title>
+    <title>Fanpage Control Center · V14.6 Path-Based Media Match & Matrix Publisher</title>
     <!-- Tailwind CSS CDN -->
     <!--
   ===== GITHUB SYNC – ĐỒNG BỘ MỖI KHI CÓ THAY ĐỔI (localStorage) =====
@@ -1009,9 +1009,9 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                         <div>
                             <div class="flex items-center gap-2 flex-wrap">
                                 <h3 class="text-base md:text-lg font-bold text-white">Import Kho Bài Viết PHOTO & VIDEO Từ Ổ Đĩa Máy Tính Qua Excel</h3>
-                                <span class="bg-cyan-500/20 text-cyan-300 text-[10px] font-mono px-2.5 py-0.5 rounded-full border border-cyan-500/30 font-bold">V14.5 Smart Fuzzy Auto-Match Engine</span>
+                                <span class="bg-cyan-500/20 text-cyan-300 text-[10px] font-mono px-2.5 py-0.5 rounded-full border border-cyan-500/30 font-bold">V14.6 Path-Based Auto-Match</span>
                             </div>
-                            <p class="text-xs text-slate-400 mt-0.5">Tự động nhận diện file, ghép với bài viết; có thể chọn tải media lên GitHub Sync hoặc chỉ lưu trên máy này.</p>
+                            <p class="text-xs text-slate-400 mt-0.5">Ghép bài viết với media theo đường dẫn thư mục trong Excel, không tự ghép chỉ theo tên file; có thể chọn tải media lên GitHub Sync hoặc chỉ lưu trên máy này.</p>
                         </div>
                     </div>
                     <button onclick="closeLocalExcelImportModal()" class="text-slate-400 hover:text-white p-2 text-xl"><i class="fa-solid fa-xmark"></i></button>
@@ -1042,7 +1042,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                                 <i class="fa-solid fa-file-arrow-up text-base"></i>
                             </div>
                             <div class="text-slate-200 font-bold text-xs" id="excel-file-name-label">Click hoặc Kéo thả File Excel bài viết vào đây</div>
-                            <div class="text-[10px] text-slate-400 mt-0.5">Hỗ trợ .XLSX, .XLS (Tự động tách bỏ đường dẫn C:\ D:\)</div>
+                            <div class="text-[10px] text-slate-400 mt-0.5">Hỗ trợ .XLSX, .XLS; dùng đường dẫn tương đối bên trong thư mục media đã chọn.</div>
                         </div>
 
                         <div class="flex items-center justify-between text-[11px] pt-1 border-t border-slate-800/80">
@@ -1088,7 +1088,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                                 <input type="file" id="local-files-picker" multiple accept="image/*,video/*" onchange="handleLocalMultiFilesSelect(event)" class="hidden">
                             </div>
                             
-                            <div class="text-[10px] text-slate-400">Tự động đối chiếu chuẩn Unicode Tiếng Việt & phần mở rộng (.jpg, .jpeg, .png, .mp4, .mov...)!</div>
+                            <div class="text-[10px] text-slate-400">Hãy chọn cả thư mục media để giữ đường dẫn con; file chỉ được tự ghép khi đường dẫn khớp.</div>
                         </div>
 
                         <div class="flex items-center justify-between text-[11px] pt-1 border-t border-slate-800/80">
@@ -1170,7 +1170,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                         <div class="flex items-center gap-2">
                             <div class="relative w-44">
                                 <i class="fa-solid fa-magnifying-glass absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 text-[10px]"></i>
-                                <input type="text" id="matrix-table-search" oninput="renderLocalExcelPreviewTable()" placeholder="Lọc theo tên file..." class="w-full bg-slate-900 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-cyan-500">
+                                <input type="text" id="matrix-table-search" oninput="renderLocalExcelPreviewTable()" placeholder="Lọc theo đường dẫn..." class="w-full bg-slate-900 border border-slate-800 rounded-lg pl-7 pr-2 py-1 text-[11px] text-slate-200 focus:outline-none focus:border-cyan-500">
                             </div>
                             <label class="flex items-center text-[11px] text-slate-300 cursor-pointer">
                                 <input type="checkbox" id="chk-auto-create-folders" class="accent-teal-500 w-3.5 h-3.5 rounded mr-1.5" checked>
@@ -1188,7 +1188,7 @@ button.d{background:#450a0a;color:#fca5a5;grid-column:1/-1}
                                     <th class="p-2.5 w-10 text-center">STT</th>
                                     <th class="p-2.5 min-w-[120px]">Thư Mục Kho</th>
                                     <th class="p-2.5 min-w-[75px]">Loại</th>
-                                    <th class="p-2.5 min-w-[170px]">Tên File Trên Ổ Đĩa</th>
+                                    <th class="p-2.5 min-w-[220px]">Đường Dẫn File Trên Ổ Đĩa</th>
                                     <th class="p-2.5 min-w-[240px]">Nội Dung Caption (Spintax)</th>
                                     <th class="p-2.5 min-w-[260px]">Trạng Thái Khớp Tệp & Giải Pháp</th>
                                     <th class="p-2.5 text-center min-w-[90px]">Xem Trước</th>
@@ -3009,7 +3009,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
         // --- STAGING FOR LOCAL EXCEL & MEDIA MATCHING (V14.5 PRO UPGRADED) ---
         let localExcelRowsParsed = [];
         let loadedLocalFilesList = []; // Array of actual File objects
-        let localDiskFilesMap = new Map(); // cleanName (lower) -> File
+        let localDiskFilesMap = new Map(); // normalized relative path (lower) -> File
         const sessionOnlyMediaFiles = new Map(); // File references held only in RAM for the current tab; never persisted
         let stagedMatchedLibraryPosts = [];
         let matrixActiveStatusFilter = 'all'; // 'all', 'missing', 'matched', 'fuzzy', 'text'
@@ -3304,13 +3304,46 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
         }
 
         // =========================================================================
-        // --- SMART FILENAME NORMALIZATION & ADVANCED FUZZY MATCHING SUITE ---
+        // --- PATH-BASED LOCAL MEDIA MATCHING ---
         // =========================================================================
 
-        /**
-         * Tách bỏ đường dẫn thư mục (C:\, D:\, /Users/...), loại bỏ dấu ngoặc kép,
-         * chuẩn hóa Unicode NFC tiếng Việt và xóa khoảng trắng thừa.
-         */
+        /** Chuẩn hóa đường dẫn media; giữ nguyên cấu trúc thư mục để không nhầm các file trùng tên. */
+        function normalizeDiskPath(rawPath) {
+            if (!rawPath) return '';
+            let s = String(rawPath).trim().replace(/^["'`\s]+|["'`\s]+$/g, '').normalize('NFC');
+            s = s.replace(/\\/g, '/').replace(/^[a-z]:/i, '').replace(/^\/+/, '');
+            const parts = [];
+            s.split('/').forEach(part => {
+                const segment = part.trim();
+                if (!segment || segment === '.') return;
+                if (segment === '..') { if (parts.length) parts.pop(); return; }
+                parts.push(segment);
+            });
+            return parts.join('/');
+        }
+
+        function getLocalDiskFilePath(file) {
+            return file ? String(file.webkitRelativePath || file.relativePath || '').trim() : '';
+        }
+
+        function getLocalDiskFilePathKey(file) {
+            return normalizeDiskPath(getLocalDiskFilePath(file)).toLowerCase();
+        }
+
+        function getDisplayedLocalDiskPath(file) {
+            return getLocalDiskFilePath(file) || file?.name || '';
+        }
+
+        function pathsMatchByDirectory(requestedPath, availablePath) {
+            const requested = normalizeDiskPath(requestedPath).toLowerCase().split('/').filter(Boolean);
+            const available = normalizeDiskPath(availablePath).toLowerCase().split('/').filter(Boolean);
+            if (requested.length < 2 || available.length < 2) return false;
+            const shorter = requested.length <= available.length ? requested : available;
+            const longer = requested.length <= available.length ? available : requested;
+            return shorter.every((part, index) => part === longer[longer.length - shorter.length + index]);
+        }
+
+        /** Lấy tên file cuối cùng để dùng cho phần hiển thị hoặc thông tin media, không dùng để tự ghép. */
         function cleanExtractFilename(rawPath) {
             if (!rawPath) return '';
             let s = String(rawPath).trim();
@@ -3380,58 +3413,33 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
             return total > 0 ? (2.0 * intersect) / total : 0;
         }
 
-        /**
-         * Thuật toán khớp đa tầng (Multi-tier Matcher):
-         * 1. Khớp chính xác tên file (Exact Case-insensitive)
-         * 2. Khớp cùng tên gốc (Base Name), khác phần mở rộng (.jpg vs .jpeg, .png, .mp4, ...)
-         * 3. Khớp Slug rút gọn
-         * 4. Tìm tệp tương đồng nhất (Fuzzy match suggestion)
-         */
-        function evaluateFileMatch(requestedRaw, availableFiles, assignedFileNames = new Set()) {
+        /** Tự ghép theo đường dẫn thư mục; gợi ý gần đúng cũng so sánh toàn bộ đường dẫn. */
+        function evaluateFileMatch(requestedRaw, availableFiles, assignedFiles = new Set()) {
             if (!requestedRaw || !availableFiles || !availableFiles.length) {
                 return { matchedFile: null, matchType: 'none', suggestion: null, score: 0 };
             }
 
-            const cleanReq = cleanExtractFilename(requestedRaw);
-            const cleanReqLower = cleanReq.toLowerCase();
-            const reqBaseName = getFileBaseName(cleanReq).toLowerCase();
-            const reqSlug = simplifySlug(cleanReq);
+            const cleanReq = normalizeDiskPath(requestedRaw);
+            const requestedSegments = cleanReq.split('/').filter(Boolean);
+            if (requestedSegments.length < 2) return { matchedFile: null, matchType: 'none', suggestion: null, score: 0 };
 
-            // Tier 1: Khớp chính xác hoàn hảo
-            for (let f of availableFiles) {
-                const fClean = cleanExtractFilename(f.name);
-                if (fClean.toLowerCase() === cleanReqLower) {
-                    return { matchedFile: f, matchType: 'exact', suggestion: null, score: 1.0 };
-                }
-            }
+            const candidates = availableFiles.filter(file => !assignedFiles.has(file) && getLocalDiskFilePath(file));
+            const exactMatches = candidates.filter(file => normalizeDiskPath(getLocalDiskFilePath(file)).toLowerCase() === cleanReq.toLowerCase());
+            if (exactMatches.length === 1) return { matchedFile: exactMatches[0], matchType: 'path_exact', suggestion: null, score: 1.0 };
+            if (exactMatches.length > 1) return { matchedFile: null, matchType: 'none', suggestion: null, score: 0 };
 
-            // Tier 2: Khớp tên gốc (BaseName) - cùng tên nhưng khác đuôi mở rộng
-            for (let f of availableFiles) {
-                const fBase = getFileBaseName(f.name).toLowerCase();
-                if (fBase === reqBaseName) {
-                    return { matchedFile: f, matchType: 'extension_variant', suggestion: null, score: 0.95 };
-                }
-            }
+            const pathMatches = candidates.filter(file => pathsMatchByDirectory(cleanReq, getLocalDiskFilePath(file)));
+            if (pathMatches.length === 1) return { matchedFile: pathMatches[0], matchType: 'path_match', suggestion: null, score: 0.98 };
+            if (pathMatches.length > 1) return { matchedFile: null, matchType: 'none', suggestion: null, score: 0 };
 
-            // Tier 3: Khớp Slug (bỏ qua dấu gạch dưới, gạch ngang, khoảng trắng, tiếng Việt)
-            for (let f of availableFiles) {
-                const fSlug = simplifySlug(f.name);
-                if (fSlug === reqSlug) {
-                    return { matchedFile: f, matchType: 'slug_match', suggestion: null, score: 0.90 };
-                }
-            }
-
-            // Tier 4: Fuzzy Matching gợi ý tệp tương đồng trong danh sách tệp chưa gán
+            // Gợi ý không tự gán; so sánh đường dẫn đầy đủ để thư mục vẫn tham gia tính điểm.
             let bestCandidate = null;
             let highestScore = 0;
-
-            for (let f of availableFiles) {
-                const fClean = cleanExtractFilename(f.name);
-                const score = calculateStringSimilarity(cleanReq, fClean);
-                if (score > highestScore) {
-                    highestScore = score;
-                    bestCandidate = f;
-                }
+            for (let f of candidates) {
+                const availablePath = getLocalDiskFilePath(f);
+                if (normalizeDiskPath(availablePath).split('/').filter(Boolean).length < 2) continue;
+                const score = calculateStringSimilarity(cleanReq, normalizeDiskPath(availablePath));
+                if (score > highestScore) { highestScore = score; bestCandidate = f; }
             }
 
             if (bestCandidate && highestScore >= 0.55) {
@@ -3678,16 +3686,16 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                     "STT": 1,
                     "THƯ MỤC KHO": "🔥 Khuyến Mãi",
                     "LOẠI MEDIA": "photo",
-                    "TÊN FILE TRÊN Ổ ĐĨA": "ao_thun_mua_he.jpg",
+                    "ĐƯỜNG DẪN FILE TRÊN Ổ ĐĨA": "KhuyenMai/ao_thun_mua_he.jpg",
                     "TIÊU ĐỀ VIDEO / REEL": "",
                     "NỘI DUNG CAPTION (SPINTAX & TAG)": "{🔥 Siêu Sale|⚡ Xả Kho Sốc} Mẫu áo thun cao cấp vừa cập bến! Nhanh tay inbox rinh quà @followers",
-                    "GHI CHÚ": "Ảnh chụp thực tế tại shop (Hỗ trợ cả đường dẫn D:\\Photos\\ao_thun_mua_he.jpg)"
+                    "GHI CHÚ": "Ảnh chụp thực tế tại shop; chọn thư mục media chứa nhánh KhuyenMai"
                 },
                 {
                     "STT": 2,
                     "THƯ MỤC KHO": "🎬 Video & Reel",
                     "LOẠI MEDIA": "video",
-                    "TÊN FILE TRÊN Ổ ĐĨA": "clip_review_dam.mp4",
+                    "ĐƯỜNG DẪN FILE TRÊN Ổ ĐĨA": "Video/clip_review_dam.mp4",
                     "TIÊU ĐỀ VIDEO / REEL": "Cận cảnh chất liệu đầm dạ hội 2026",
                     "NỘI DUNG CAPTION (SPINTAX & TAG)": "{Cực phẩm|Đỉnh chóp} đầm dạ hội mùa mới, chất liệu mềm mịn co giãn cực tốt inbox đặt hàng @followers",
                     "GHI CHÚ": "Video ngang 16:9 HD"
@@ -3696,7 +3704,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                     "STT": 3,
                     "THƯ MỤC KHO": "🎬 Video & Reel",
                     "LOẠI MEDIA": "reel",
-                    "TÊN FILE TRÊN Ổ ĐĨA": "reel_viral_bien.mp4",
+                    "ĐƯỜNG DẪN FILE TRÊN Ổ ĐĨA": "Reels/reel_viral_bien.mp4",
                     "TIÊU ĐỀ VIDEO / REEL": "Outfit đi biển hot trend",
                     "NỘI DUNG CAPTION (SPINTAX & TAG)": "{Bật mí|Gợi ý} outfit đi biển cực tôn dáng cho các nàng mùa hè này! Thả tim và lưu ngay @followers",
                     "GHI CHÚ": "Video dọc 9:16 dưới 60s"
@@ -3705,7 +3713,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                     "STT": 4,
                     "THƯ MỤC KHO": "💡 Chia Sẻ",
                     "LOẠI MEDIA": "post",
-                    "TÊN FILE TRÊN Ổ ĐĨA": "",
+                    "ĐƯỜNG DẪN FILE TRÊN Ổ ĐĨA": "",
                     "TIÊU ĐỀ VIDEO / REEL": "",
                     "NỘI DUNG CAPTION (SPINTAX & TAG)": "{Chúc cả nhà|Chào buổi sáng các bạn} một tuần mới tràn đầy năng lượng và bứt phá doanh số! @followers",
                     "GHI CHÚ": "Bài viết thuần text chào tuần mới"
@@ -3725,10 +3733,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
 
             const guideData = [
                 { "MỤC": "1. LOẠI MEDIA HỢP LỆ", "HƯỚNG DẪN": "Điền một trong các giá trị: photo (hoặc ảnh), video, reel, post (hoặc text)." },
-                { "MỤC": "2. TÊN FILE TRÊN Ổ ĐĨA", "HƯỚNG DẪN": "Điền tên file (kèm đuôi .jpg, .png, .mp4, ...) HOẶC đường dẫn đầy đủ như D:\\Anh\\Hinh1.jpg. Hệ thống V14.5 sẽ tự động bóc tách tên file thông minh!" },
+                { "MỤC": "2. ĐƯỜNG DẪN FILE TRÊN Ổ ĐĨA", "HƯỚNG DẪN": "Điền đường dẫn có cả thư mục và tên file, ví dụ KhuyenMai/Hinh1.jpg hoặc D:\\Anh\\Hinh1.jpg. Chọn thư mục media ở bước 2 để giữ đường dẫn con. Tên file đơn lẻ không được tự ghép." },
                 { "MỤC": "3. THƯ MỤC KHO", "HƯỚNG DẪN": "Tên thư mục để hệ thống tự động phân loại. Nếu thư mục chưa có, hệ thống sẽ tự động tạo mới." },
                 { "MỤC": "4. CÚ PHÁP SPINTAX", "HƯỚNG DẪN": "Sử dụng {Từ 1|Từ 2|Từ 3} để hệ thống tự động đảo câu chống Spam Facebook cực tốt." },
-                { "MỤC": "5. NÂNG CẤP V14.5 SMART MATCH", "HƯỚNG DẪN": "Nếu file trên ổ đĩa bị gõ sai đuôi hoặc thiếu ký tự, hệ thống sẽ tự động đề xuất gợi ý khớp (Fuzzy) và cho phép bạn chọn nhanh từ kho tệp đã nạp!" }
+                { "MỤC": "5. KHỚP THEO ĐƯỜNG DẪN", "HƯỚNG DẪN": "Hệ thống tự ghép theo đường dẫn thư mục và tên file; không ghép tự động theo riêng tên file. Đường dẫn gần giống chỉ hiện thành gợi ý để bạn duyệt." }
             ];
             const wsGuide = XLSX.utils.json_to_sheet(guideData);
             wsGuide['!cols'] = [{ wch: 28 }, { wch: 85 }];
@@ -3832,9 +3840,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                         else if (rawType.includes('video') || rawType.includes('clip')) rawType = 'video';
                         else if (rawType.includes('post') || rawType.includes('text') || rawType.includes('chữ')) rawType = 'post';
 
-                        // Trích xuất và làm sạch tên file
-                        const rawFileCell = String(r["TÊN FILE TRÊN Ổ ĐĨA"] || r["TÊN FILE MEDIA TRÊN Ổ ĐĨA"] || r["fileName"] || r["Tên File"] || "").trim();
-                        const fileNameReq = cleanExtractFilename(rawFileCell);
+                        // Giữ nguyên đường dẫn để ghép đúng cả thư mục, không bóc về tên file.
+                        const rawFileCell = String(r["ĐƯỜNG DẪN FILE TRÊN Ổ ĐĨA"] || r["ĐƯỜNG DẪN FILE MEDIA TRÊN Ổ ĐĨA"] || r["FILE PATH"] || r["filePath"] || r["TÊN FILE TRÊN Ổ ĐĨA"] || r["TÊN FILE MEDIA TRÊN Ổ ĐĨA"] || r["fileName"] || r["Tên File"] || "").trim();
+                        const filePathReq = rawFileCell;
 
                         const folderName = String(r["THƯ MỤC KHO"] || r["TÊN THƯ MỤC"] || r["Thư mục"] || "Mặc Định").trim();
                         const videoTitle = String(r["TIÊU ĐỀ VIDEO / REEL"] || r["TIÊU ĐỀ VIDEO"] || r["title"] || "").trim();
@@ -3843,7 +3851,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                             rowIdx: idx + 1,
                             content: content,
                             mediaType: rawType,
-                            fileNameReq: fileNameReq,
+                            filePathReq: filePathReq,
                             folderName: folderName,
                             videoTitle: videoTitle,
                             matchedFile: null,
@@ -3902,14 +3910,11 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
         function addLocalDiskFiles(fileList) {
             let countNew = 0;
             fileList.forEach(f => {
-                const cleanName = cleanExtractFilename(f.name);
-                const nameKey = cleanName.toLowerCase();
-                
-                if (!localDiskFilesMap.has(nameKey)) {
-                    loadedLocalFilesList.push(f);
-                    localDiskFilesMap.set(nameKey, f);
-                    countNew++;
-                }
+                const pathKey = getLocalDiskFilePathKey(f);
+                if (pathKey ? localDiskFilesMap.has(pathKey) : loadedLocalFilesList.includes(f)) return;
+                loadedLocalFilesList.push(f);
+                if (pathKey) localDiskFilesMap.set(pathKey, f);
+                countNew++;
             });
 
             document.getElementById('local-disk-files-stat').innerText = `${loadedLocalFilesList.length} tệp đã nạp`;
@@ -3926,16 +3931,16 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                 return;
             }
 
-            const assignedFileNames = new Set();
+            const assignedFiles = new Set();
 
             stagedMatchedLibraryPosts = localExcelRowsParsed.map((item, idx) => {
                 // Nếu người dùng đã tự gán file thủ công trước đó thì giữ nguyên
                 if (item.manuallyAssigned && item.matchedFile) {
-                    assignedFileNames.add(cleanExtractFilename(item.matchedFile.name).toLowerCase());
+                    assignedFiles.add(item.matchedFile);
                     return item;
                 }
 
-                if (item.mediaType === 'post' || !item.fileNameReq) {
+                if (item.mediaType === 'post' || !item.filePathReq) {
                     return {
                         ...item,
                         matchedFile: null,
@@ -3945,9 +3950,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                     };
                 }
 
-                const evalRes = evaluateFileMatch(item.fileNameReq, loadedLocalFilesList, assignedFileNames);
+                const evalRes = evaluateFileMatch(item.filePathReq, loadedLocalFilesList, assignedFiles);
                 if (evalRes.matchedFile) {
-                    assignedFileNames.add(cleanExtractFilename(evalRes.matchedFile.name).toLowerCase());
+                    assignedFiles.add(evalRes.matchedFile);
                 }
 
                 return {
@@ -3964,14 +3969,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
         }
 
         function getUnassignedDiskFiles() {
-            const assignedNames = new Set();
+            const assignedFiles = new Set();
             stagedMatchedLibraryPosts.forEach(item => {
                 if (item.matchedFile) {
-                    assignedNames.add(cleanExtractFilename(item.matchedFile.name).toLowerCase());
+                    assignedFiles.add(item.matchedFile);
                 }
             });
 
-            return loadedLocalFilesList.filter(f => !assignedNames.has(cleanExtractFilename(f.name).toLowerCase()));
+            return loadedLocalFilesList.filter(f => !assignedFiles.has(f));
         }
 
         function setMatrixStatusFilter(status) {
@@ -4044,7 +4049,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
 
             if (searchKeyword) {
                 displayedItems = displayedItems.filter(item => 
-                    (item.fileNameReq && item.fileNameReq.toLowerCase().includes(searchKeyword)) ||
+                    (item.filePathReq && item.filePathReq.toLowerCase().includes(searchKeyword)) ||
                     (item.content && item.content.toLowerCase().includes(searchKeyword)) ||
                     (item.folderName && item.folderName.toLowerCase().includes(searchKeyword))
                 );
@@ -4077,9 +4082,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                     const objUrl = URL.createObjectURL(item.matchedFile);
 
                     let matchTypeBadge = '';
-                    if (item.matchType === 'exact') matchTypeBadge = `<span class="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">Chuẩn 100%</span>`;
-                    else if (item.matchType === 'extension_variant') matchTypeBadge = `<span class="text-[9px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.2 rounded font-mono">Khác đuôi</span>`;
-                    else if (item.matchType === 'slug_match') matchTypeBadge = `<span class="text-[9px] bg-indigo-500/20 text-indigo-300 px-1.5 py-0.2 rounded font-mono">Khớp Slug</span>`;
+                    if (item.matchType === 'path_exact') matchTypeBadge = `<span class="text-[9px] bg-emerald-500/20 text-emerald-300 px-1.5 py-0.2 rounded font-mono">Khớp đường dẫn</span>`;
+                    else if (item.matchType === 'path_match') matchTypeBadge = `<span class="text-[9px] bg-cyan-500/20 text-cyan-300 px-1.5 py-0.2 rounded font-mono">Khớp đường dẫn con</span>`;
                     else if (item.manuallyAssigned) matchTypeBadge = `<span class="text-[9px] bg-amber-500/20 text-amber-300 px-1.5 py-0.2 rounded font-mono">Đã gán tay</span>`;
 
                     statusHtml = `
@@ -4093,8 +4097,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                                     <i class="fa-solid fa-xmark"></i>
                                 </button>
                             </div>
-                            <div class="text-[10px] text-slate-300 font-mono truncate max-w-[240px]" title="${escapeHtml(item.matchedFile.name)}">
-                                💾 ${escapeHtml(item.matchedFile.name)} <span class="text-slate-500">(${sizeMb}MB)</span>
+                            <div class="text-[10px] text-slate-300 font-mono truncate max-w-[240px]" title="${escapeHtml(getDisplayedLocalDiskPath(item.matchedFile))}">
+                                💾 ${escapeHtml(getDisplayedLocalDiskPath(item.matchedFile))} <span class="text-slate-500">(${sizeMb}MB)</span>
                             </div>
                         </div>
                     `;
@@ -4116,9 +4120,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                     if (item.fuzzyCandidate) {
                         suggestionBox = `
                             <div class="bg-amber-950/40 border border-amber-500/30 rounded-lg p-1.5 mt-1 flex items-center justify-between gap-1.5 text-[10px]">
-                                <div class="truncate text-amber-200" title="Gợi ý: ${escapeHtml(item.fuzzyCandidate.name)}">
+                                <div class="truncate text-amber-200" title="Gợi ý: ${escapeHtml(getDisplayedLocalDiskPath(item.fuzzyCandidate))}">
                                     <i class="fa-solid fa-lightbulb text-amber-400 mr-0.5"></i>
-                                    Gợi ý: <strong>${escapeHtml(item.fuzzyCandidate.name)}</strong> (${item.fuzzyScore}%)
+                                    Gợi ý: <strong>${escapeHtml(getDisplayedLocalDiskPath(item.fuzzyCandidate))}</strong> (${item.fuzzyScore}%)
                                 </div>
                                 <button type="button" onclick="acceptFuzzyCandidate(${idx})" class="bg-amber-600 hover:bg-amber-500 text-white font-bold px-2 py-0.5 rounded text-[10px] shrink-0 transition">
                                     ✓ Khớp ngay
@@ -4172,10 +4176,10 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                         <td class="p-2.5">${typeBadge}</td>
                         <td class="p-2.5">
                             <div class="flex items-center gap-1.5">
-                                <span class="font-mono text-cyan-300 font-bold text-xs truncate max-w-[140px]" title="${escapeHtml(item.fileNameReq || 'Không có')}">
-                                    ${escapeHtml(item.fileNameReq || '--')}
+                                <span class="font-mono text-cyan-300 font-bold text-xs truncate max-w-[180px]" title="${escapeHtml(item.filePathReq || 'Không có')}">
+                                    ${escapeHtml(item.filePathReq || '--')}
                                 </span>
-                                <button type="button" onclick="promptEditRequestedFileName(${idx})" class="text-slate-500 hover:text-amber-400 text-[10px]" title="Sửa tên file cần tìm">
+                                <button type="button" onclick="promptEditRequestedFilePath(${idx})" class="text-slate-500 hover:text-amber-400 text-[10px]" title="Sửa đường dẫn file cần tìm">
                                     <i class="fa-solid fa-pen"></i>
                                 </button>
                             </div>
@@ -4249,7 +4253,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
 
             renderLocalExcelPreviewTable();
             renderUnassignedDrawer();
-            showToast(`Đã khớp file "${item.matchedFile.name}" cho dòng #${item.rowIdx}!`, 'success');
+            showToast(`Đã khớp đường dẫn "${getDisplayedLocalDiskPath(item.matchedFile)}" cho dòng #${item.rowIdx}!`, 'success');
         }
 
         /**
@@ -4286,18 +4290,18 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
         }
 
         /**
-         * 5. Sửa tên file cần tìm (fileNameReq) trực tiếp
+         * 5. Sửa đường dẫn file cần tìm trực tiếp
          */
-        function promptEditRequestedFileName(idx) {
+        function promptEditRequestedFilePath(idx) {
             const item = stagedMatchedLibraryPosts[idx];
             if (!item) return;
 
-            const current = item.fileNameReq || '';
-            const newName = prompt(`Nhập tên file trên máy tính cho dòng #${item.rowIdx}:`, current);
+            const current = item.filePathReq || '';
+            const newPath = prompt(`Nhập đường dẫn file trên máy tính cho dòng #${item.rowIdx}:`, current);
 
-            if (newName !== null) {
-                const cleaned = cleanExtractFilename(newName);
-                item.fileNameReq = cleaned;
+            if (newPath !== null) {
+                const cleaned = String(newPath).trim();
+                item.filePathReq = cleaned;
                 item.manuallyAssigned = false;
                 item.matchedFile = null;
 
@@ -4312,9 +4316,9 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                 renderUnassignedDrawer();
 
                 if (item.matchedFile) {
-                    showToast(`✓ Đã tìm thấy và khớp file "${item.matchedFile.name}"!`, 'success');
+                    showToast(`✓ Đã tìm thấy và khớp đường dẫn "${getDisplayedLocalDiskPath(item.matchedFile)}"!`, 'success');
                 } else {
-                    showToast(`Đã cập nhật tên cần tìm: "${cleaned}". Vẫn chưa thấy file trong các tệp đã nạp.`, 'warning');
+                    showToast(`Đã cập nhật đường dẫn cần tìm: "${cleaned}". Vẫn chưa thấy file trong các tệp đã nạp.`, 'warning');
                 }
             }
         }
@@ -4345,8 +4349,8 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                 "STT DÒNG": m.rowIdx,
                 "THƯ MỤC KHO": m.folderName,
                 "LOẠI MEDIA": m.mediaType,
-                "TÊN FILE ĐANG THIẾU": m.fileNameReq,
-                "GỢI Ý TƯƠNG ĐỒNG": m.fuzzyCandidate ? m.fuzzyCandidate.name : "Không tìm thấy file gần giống",
+                "ĐƯỜNG DẪN FILE ĐANG THIẾU": m.filePathReq,
+                "GỢI Ý ĐƯỜNG DẪN": m.fuzzyCandidate ? getDisplayedLocalDiskPath(m.fuzzyCandidate) : "Không tìm thấy đường dẫn gần giống",
                 "ĐỘ KHỚP (%)": m.fuzzyScore || 0,
                 "NỘI DUNG CAPTION": m.content
             }));
@@ -4386,7 +4390,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
 
             let filtered = unassigned;
             if (searchVal) {
-                filtered = filtered.filter(f => f.name.toLowerCase().includes(searchVal));
+                filtered = filtered.filter(f => getDisplayedLocalDiskPath(f).toLowerCase().includes(searchVal));
             }
 
             if (!filtered.length) {
@@ -4395,12 +4399,14 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
             }
 
             grid.innerHTML = filtered.map(f => {
+                const fileIndex = loadedLocalFilesList.indexOf(f);
                 const isVideo = f.type.startsWith('video/');
                 const objUrl = URL.createObjectURL(f);
                 const sizeMb = (f.size / (1024 * 1024)).toFixed(2);
+                const displayPath = getDisplayedLocalDiskPath(f);
 
                 return `
-                    <div onclick="selectUnassignedFileForRow('${escapeHtml(f.name)}')" class="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500 cursor-pointer transition flex flex-col justify-between group shadow">
+                    <div onclick="selectUnassignedFileForRow(${fileIndex})" class="p-2 rounded-xl bg-slate-900 border border-slate-800 hover:border-cyan-500 cursor-pointer transition flex flex-col justify-between group shadow">
                         <div class="relative aspect-video rounded-lg overflow-hidden bg-slate-950 flex items-center justify-center mb-1.5">
                             ${isVideo ? `
                                 <div class="text-rose-400 text-xl"><i class="fa-solid fa-circle-play"></i></div>
@@ -4408,17 +4414,17 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                                 <img src="${objUrl}" class="w-full h-full object-cover">
                             `}
                         </div>
-                        <div class="text-[10px] text-slate-200 font-bold font-mono truncate" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+                        <div class="text-[10px] text-slate-200 font-bold font-mono truncate" title="${escapeHtml(displayPath)}">${escapeHtml(displayPath)}</div>
                         <div class="text-[9px] text-slate-500">${sizeMb} MB · Click để gán</div>
                     </div>
                 `;
             }).join('');
         }
 
-        function selectUnassignedFileForRow(fileName) {
+        function selectUnassignedFileForRow(fileIndex) {
             if (currentTargetRowForPicker === null || !stagedMatchedLibraryPosts[currentTargetRowForPicker]) return;
 
-            const targetFile = loadedLocalFilesList.find(f => f.name === fileName);
+            const targetFile = loadedLocalFilesList[fileIndex];
             if (!targetFile) {
                 showToast('Không tìm thấy tệp trong bộ nhớ nạp!', 'warning');
                 return;
@@ -4433,7 +4439,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
             closeUnassignedPickerModal();
             renderLocalExcelPreviewTable();
             renderUnassignedDrawer();
-            showToast(`✓ Đã gán tệp "${targetFile.name}" cho dòng #${item.rowIdx}!`, 'success');
+            showToast(`✓ Đã gán tệp "${getDisplayedLocalDiskPath(targetFile)}" cho dòng #${item.rowIdx}!`, 'success');
         }
 
         function handleRowDragOver(e, rowIdx) {
@@ -4464,23 +4470,24 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
         function assignSingleMatchedFile(index, file) {
             if (!file || !stagedMatchedLibraryPosts[index]) return;
 
-            const clean = cleanExtractFilename(file.name);
-            const nameKey = clean.toLowerCase();
-
-            if (!localDiskFilesMap.has(nameKey)) {
+            const pathKey = getLocalDiskFilePathKey(file);
+            let storedFile = pathKey ? localDiskFilesMap.get(pathKey) : null;
+            if (!storedFile && loadedLocalFilesList.includes(file)) storedFile = file;
+            if (!storedFile) {
                 loadedLocalFilesList.push(file);
-                localDiskFilesMap.set(nameKey, file);
+                storedFile = file;
+                if (pathKey) localDiskFilesMap.set(pathKey, file);
                 document.getElementById('local-disk-files-stat').innerText = `${loadedLocalFilesList.length} tệp đã nạp`;
             }
 
-            stagedMatchedLibraryPosts[index].matchedFile = file;
+            stagedMatchedLibraryPosts[index].matchedFile = storedFile;
             stagedMatchedLibraryPosts[index].manuallyAssigned = true;
             stagedMatchedLibraryPosts[index].matchType = 'manual_assigned';
             stagedMatchedLibraryPosts[index].fuzzyCandidate = null;
 
             renderLocalExcelPreviewTable();
             renderUnassignedDrawer();
-            showToast(`✓ Đã nạp và gán file "${file.name}" cho dòng #${stagedMatchedLibraryPosts[index].rowIdx}!`, 'success');
+            showToast(`✓ Đã nạp và gán file "${getDisplayedLocalDiskPath(storedFile)}" cho dòng #${stagedMatchedLibraryPosts[index].rowIdx}!`, 'success');
         }
 
         function toggleUnassignedDrawer() {
@@ -4524,7 +4531,7 @@ Page Mỹ Phẩm | 100000000000002 | EAAB... | BM Thương hiệu ABC"
                         <div class="relative aspect-video rounded overflow-hidden bg-slate-950 flex items-center justify-center">
                             ${isVideo ? `<i class="fa-solid fa-film text-rose-400 text-sm"></i>` : `<img src="${objUrl}" class="w-full h-full object-cover">`}
                         </div>
-                        <div class="text-[10px] font-mono text-slate-200 truncate" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</div>
+                        <div class="text-[10px] font-mono text-slate-200 truncate" title="${escapeHtml(getDisplayedLocalDiskPath(f))}">${escapeHtml(getDisplayedLocalDiskPath(f))}</div>
                         <div class="flex items-center justify-between text-[9px] text-slate-400">
                             <span>${sizeMb}MB</span>
                             <button type="button" onclick="openMediaLightbox('${isVideo ? 'video' : 'photo'}', '${objUrl}', '${escapeHtml(f.name)}')" class="text-cyan-400 hover:underline">Xem</button>
